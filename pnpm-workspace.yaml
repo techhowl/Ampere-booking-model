@@ -1,0 +1,19 @@
+# Single package. This file exists because pnpm reads settings from here rather
+# than from a "pnpm" key in package.json.
+#
+# Dependency build scripts are blocked by default. Prisma's postinstall must run
+# or `prisma generate` never fires and @prisma/client stays an empty stub.
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  prisma: true
+  esbuild: true
+  unrs-resolver: true
+  sharp: true
+
+  # Testcontainers' optional SSH/native extras. Denied on purpose: ssh2 falls
+  # back to its pure-JS path without cpu-features, we never use the SSH
+  # transport, and cpu-features wants a native toolchain that CI need not have.
+  cpu-features: false
+  ssh2: false
+  protobufjs: false

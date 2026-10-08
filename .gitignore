@@ -1,0 +1,51 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.*
+
+# next
+.next/
+out/
+next-env.d.ts
+
+# production
+build/
+dist/
+
+# env — never commit. .env.example is the template.
+.env
+.env.*
+!.env.example
+
+# testing
+coverage/
+
+# prisma
+prisma/*.db
+prisma/*.db-journal
+
+# misc
+.DS_Store
+*.pem
+.vercel
+*.tsbuildinfo
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Unoptimised source photography. Kept on disk, out of the repo — the
+# originals are ~1.5MB each and only the resized versions ship.
+assets/models-source/
+
+# Design reference exports — working material, not shipped.
+assets/design/
+!assets/design/README.md
+
+# Word lock files
+~$*
+
+# Superseded handover drafts
+docs/handover/*(v[0-9]).docx

@@ -1,0 +1,321 @@
+// Ampere /buy — data model
+// Postgres. See Build Specification §12.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LeadIntent {
+  undecided
+  testride
+  buy
+}
+
+enum OrderStatus {
+  initiated
+  pending
+  paid
+  failed
+  expired
+  refunded
+}
+
+enum PaymentType {
+  full
+  partial
+  emi
+}
+
+enum ReservationStatus {
+  held
+  converted
+  released
+}
+
+/// Written as soon as name + phone + pincode are present — BEFORE OTP.
+/// phoneVerified flips to true on successful verification.
+/// An abandoned attempt is still a lead somebody can call.
+model Lead {
+  id            String     @id @default(uuid()) @db.Uuid
+  name          String
+  phoneEnc      Bytes      @map("phone_enc")
+  /// HMAC-SHA256 of the E.164 number. Lookup + dedupe key. Never the raw number.
+  phoneHash     String     @map("phone_hash") @db.Char(64)
+  phoneLast4    String     @map("phone_last4") @db.Char(4)
+  phoneVerified Boolean    @default(false) @map("phone_verified")
+  pincode       String     @db.Char(6)
+  stateCode     String?    @map("state_code")
+  regionCode    String?    @map("region_code")
+  dealerCode    String?    @map("dealer_code")
+  modelCode     String?    @map("model_code")
+  colourCode    String?    @map("colour_code")
+  intent        LeadIntent @default(undecided)
+  status        String     @default("new")
+  src           String?
+  utm           Json?
+  gclid         String?
+  fbclid        String?
+  /// Full original query string, whatever we managed to parse from it.
+  sourceRaw     Json?      @map("source_raw")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  dealer    Dealer?     @relation(fields: [dealerCode], references: [dealerCode])
+  consents  Consent[]
+  orders    Order[]
+  testRides TestRide[]
+
+  @@index([phoneHash])
+  @@index([phoneVerified, createdAt(sort: Desc)])
+  @@index([dealerCode, status])
+  @@map("leads")
+}
+
+/// One row per purpose. Transactional and marketing are recorded separately
+/// and are independently revocable. Captured at step one, under the phone field.
+model Consent {
+  id            String   @id @default(uuid()) @db.Uuid
+  leadId        String   @map("lead_id") @db.Uuid
+  purpose       String // "transactional" | "marketing"
+  granted       Boolean
+  noticeVersion String   @map("notice_version")
+  ip            String?
+  userAgent     String?  @map("user_agent")
+  grantedAt     DateTime @default(now()) @map("granted_at")
+
+  lead Lead @relation(fields: [leadId], references: [id])
+
+  @@index([leadId])
+  @@map("consents")
+}
+
+model OtpAttempt {
+  otpRef    String    @id @map("otp_ref")
+  phoneHash String    @map("phone_hash") @db.Char(64)
+  codeHash  String    @map("code_hash")
+  channel   String    @default("sms")
+  attempts  Int       @default(0)
+  verifiedAt DateTime? @map("verified_at")
+  expiresAt DateTime  @map("expires_at")
+  ip        String?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([phoneHash, createdAt])
+  @@index([expiresAt])
+  @@map("otp_attempts")
+}
+
+/// Manual stock. Per model, per region. Updated from the admin grid.
+/// available = unitsTotal - unitsReserved
+model Inventory {
+  modelCode     String   @map("model_code")
+  regionCode    String   @map("region_code")
+  unitsTotal    Int      @default(15) @map("units_total")
+  unitsReserved Int      @default(0) @map("units_reserved")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+  updatedBy     String?  @map("updated_by")
+
+  @@id([modelCode, regionCode])
+  @@map("inventory")
+}
+
+/// Every change to a stock number, with who and when.
+/// You will want this the first time a number looks wrong.
+model InventoryAudit {
+  id          BigInt   @id @default(autoincrement())
+  modelCode   String   @map("model_code")
+  regionCode  String   @map("region_code")
+  unitsBefore Int      @map("units_before")
+  unitsAfter  Int      @map("units_after")
+  changedBy   String   @map("changed_by")
+  changedAt   DateTime @default(now()) @map("changed_at")
+
+  @@index([modelCode, regionCode, changedAt])
+  @@map("inventory_audit")
+}
+
+/// A unit held while a customer is away paying. Expires after 15 minutes.
+/// Without this, two people can buy the last unit in the same minute.
+model InventoryReservation {
+  id         String            @id @default(uuid()) @db.Uuid
+  orderId    String            @unique @map("order_id")
+  modelCode  String            @map("model_code")
+  regionCode String            @map("region_code")
+  status     ReservationStatus @default(held)
+  expiresAt  DateTime          @map("expires_at")
+  createdAt  DateTime          @default(now()) @map("created_at")
+
+  @@index([status, expiresAt])
+  @@map("inventory_reservations")
+}
+
+model Order {
+  /// Juspay-issued. The join key across lead, payment, reservation and dealer.
+  /// Reused on retry so one intent never becomes two orders.
+  orderId         String      @id @map("order_id")
+  leadId          String      @map("lead_id") @db.Uuid
+  dealerCode      String?     @map("dealer_code")
+  modelCode       String      @map("model_code")
+  colourCode      String?     @map("colour_code")
+  regionCode      String      @map("region_code")
+  paymentType     PaymentType @map("payment_type")
+  /// Vehicle price. Always resolved server-side from priceBook.
+  amountTotal     Decimal     @map("amount_total") @db.Decimal(12, 2)
+  /// What Juspay collects now — equals amountTotal for `full`.
+  amountCharged   Decimal     @map("amount_charged") @db.Decimal(12, 2)
+  amountPaid      Decimal?    @map("amount_paid") @db.Decimal(12, 2)
+  status          OrderStatus @default(initiated)
+  /// webhook | status_api — never "return_url".
+  statusSource    String?     @map("status_source")
+  juspayStatusRaw String?     @map("juspay_status_raw")
+  /// What the EMI widget displayed at the moment of order, for disputes.
+  emiContext      Json?       @map("emi_context")
+  retryCount      Int         @default(0) @map("retry_count")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  paidAt          DateTime?   @map("paid_at")
+
+  lead   Lead    @relation(fields: [leadId], references: [id])
+  dealer Dealer? @relation(fields: [dealerCode], references: [dealerCode])
+
+  @@index([status, createdAt])
+  @@index([leadId])
+  @@map("orders")
+}
+
+/// Append-only. Every Juspay callback stored raw before it is interpreted.
+/// When a payment dispute arrives in month four, this table is the answer.
+model PaymentEvent {
+  id             BigInt   @id @default(autoincrement())
+  orderId        String   @map("order_id")
+  eventType      String?  @map("event_type")
+  signatureValid Boolean  @map("signature_valid")
+  rawPayload     Json     @map("raw_payload")
+  receivedAt     DateTime @default(now()) @map("received_at")
+
+  @@index([orderId, receivedAt])
+  @@map("payment_events")
+}
+
+model TestRide {
+  id         String   @id @default(uuid()) @db.Uuid
+  leadId     String   @map("lead_id") @db.Uuid
+  dealerCode String   @map("dealer_code")
+  modelCode  String   @map("model_code")
+  colourCode String?  @map("colour_code")
+  mode       String // "home" | "dealer"
+  slotDate   DateTime @map("slot_date") @db.Date
+  slotWindow String   @map("slot_window") // w1..w4
+  /// "offers" | "financing" | "specs" | null — the help topic the customer
+  /// picked. Journey document section 03: this intent signal is collected today
+  /// and acted on by nobody. Picking "financing" opens the EMI widget.
+  helpTopic  String?  @map("help_topic")
+  status     String   @default("booked")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  lead   Lead   @relation(fields: [leadId], references: [id])
+  dealer Dealer @relation(fields: [dealerCode], references: [dealerCode])
+
+  @@index([dealerCode, slotDate])
+  @@map("test_ride_bookings")
+}
+
+model Dealer {
+  dealerCode      String  @id @map("dealer_code")
+  name            String
+  phone           String?
+  address         String?
+  lat             Float?
+  lng             Float?
+  homeServiceable Boolean @default(false) @map("home_serviceable")
+  active          Boolean @default(true)
+
+  leads      Lead[]
+  orders     Order[]
+  testRides  TestRide[]
+  pincodeMap PincodeMap[]
+
+  @@map("dealers")
+}
+
+model PincodeMap {
+  pincode    String  @id @db.Char(6)
+  stateCode  String  @map("state_code")
+  regionCode String  @map("region_code")
+  dealerCode String? @map("dealer_code")
+
+  dealer Dealer? @relation(fields: [dealerCode], references: [dealerCode])
+
+  @@index([regionCode])
+  @@map("pincode_map")
+}
+
+/// partialMode + partialValue null => the partial payment option does not render.
+/// When the amount is decided it is typed into the admin page, not deployed.
+model PriceBook {
+  modelCode     String   @map("model_code")
+  regionCode    String   @map("region_code")
+  /// Ex-showroom price of the vehicle itself. Juspay's `product_price`.
+  amountTotal   Decimal  @map("amount_total") @db.Decimal(12, 2)
+  /// Registration and road tax. Juspay's `rto_charges`; on-road = the two summed.
+  /// Split because Juspay's order basket wants both halves, and because an
+  /// itemised price is the honest thing to show a customer.
+  rtoCharges    Decimal  @default(0) @map("rto_charges") @db.Decimal(12, 2)
+  partialMode   String?  @map("partial_mode") // "fixed" | "percent" | null
+  partialValue  Decimal? @map("partial_value") @db.Decimal(12, 2)
+  effectiveFrom DateTime @default(now()) @map("effective_from")
+
+  @@id([modelCode, regionCode, effectiveFrom])
+  @@map("price_book")
+}
+
+/// Idempotency-Key records for every mutating route.
+/// Spec 13: "Build that interceptor before the order routes, not after."
+///
+/// Lives in Postgres because there is no Redis in v1. The stored response is
+/// replayed verbatim for a repeated key, so a customer double-tapping Pay on a
+/// flaky connection cannot create two orders.
+///
+/// requestHash guards against the same key being reused for a DIFFERENT body,
+/// which is a client bug worth surfacing loudly rather than silently serving
+/// the wrong cached answer.
+model IdempotencyRecord {
+  key         String   @id
+  route       String
+  requestHash String   @map("request_hash") @db.Char(64)
+  statusCode  Int      @map("status_code")
+  response    Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  expiresAt   DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
+/// Rate limit counters. Postgres, because there is no Redis in v1.
+///
+/// Spec 15: "Uncontrolled OTP endpoints in India get abused for SMS-pumping
+/// fraud within days of launch, and the bill lands on Ampere." Limits are kept
+/// per phone, per IP and per device, so defeating one does not defeat the rest.
+///
+/// A fixed window that resets once it has elapsed. Cheaper than a sliding log
+/// and accurate enough at these limits; the trade-off is that a burst can
+/// straddle a boundary, which the per-phone cooldown covers separately.
+model RateLimit {
+  /// What is being limited, e.g. "otp_request".
+  scope       String
+  /// "phone" | "ip" | "device" — which dimension this row counts.
+  kind        String
+  /// The hashed phone, the IP, or the device id. Never a raw phone number.
+  subject     String
+  count       Int      @default(0)
+  windowStart DateTime @map("window_start")
+
+  @@id([scope, kind, subject])
+  @@index([windowStart])
+  @@map("rate_limits")
+}

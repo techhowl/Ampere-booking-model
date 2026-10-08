@@ -1,0 +1,125 @@
+@import 'tailwindcss';
+
+/* ------------------------------------------------------------------ *
+ * Brand tokens, read off the Figma file (Ampere - Buying Page).
+ *
+ * This block is the single swap point. Change a value here and it
+ * propagates everywhere — no component holds a hex code.
+ * ------------------------------------------------------------------ */
+
+@theme {
+  /*
+   * Accent. Blue, from the Figma.
+   *
+   * Two values, and the split matters. #4382E9 is the brand blue and is used
+   * for borders, rings and tints. White text on it measures only 3.74:1,
+   * which fails WCAG AA for normal text — so anything FILLED with the accent
+   * and carrying white text uses --color-amp-accent-fill instead, at 4.88:1.
+   *
+   * The difference is invisible side by side and the difference to someone
+   * reading it on a phone in daylight is not.
+   */
+  --color-amp-accent: #4382e9;
+  --color-amp-accent-fill: #2f6ed4;
+  --color-amp-accent-dark: #2a66c9;
+  --color-amp-accent-tint: #eaf1fd;
+
+  /* Primary action. Deliberately black, not the accent. */
+  --color-amp-cta: #10151c;
+  --color-amp-cta-hover: #000000;
+
+  /* Surfaces */
+  --color-amp-page: #f0f0f1;
+  --color-amp-card: #fcfcfd;
+  --color-amp-ink: #040910;
+  --color-amp-line: #d7d8db;
+  /* 4.85:1 on the page background. #6B7076 measured 4.39 and failed AA. */
+  --color-amp-muted: #65696f;
+  --color-amp-disabled: #cacbce;
+
+  /* The offers strip on a model card. */
+  --color-amp-offer: #ccead9;
+  --color-amp-offer-ink: #1d5e3c;
+
+  /*
+   * Brand typeface. DM Sans stands in for the Hoves family the Figma uses —
+   * same geometric character, free to licence, self-hosted by next/font.
+   *
+   * To swap in Ampere's licensed font: change the import in layout.tsx and
+   * the variable name here. No component names a font.
+   */
+  --font-sans:
+    var(--font-dm-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  background: var(--color-amp-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* iOS zooms the page when a focused input is under 16px. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+/* The small uppercase section labels the design uses throughout. */
+.amp-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-amp-ink);
+}
+
+/* Horizontal scrollers (dates, colours) without a visible scrollbar. */
+.amp-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.amp-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * Motion — a step should feel like a step, never at the cost of
+ * someone who has asked for less.
+ * ------------------------------------------------------------------ */
+
+@keyframes amp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.amp-rise {
+  animation: amp-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

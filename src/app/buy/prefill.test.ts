@@ -1,0 +1,120 @@
+import { describe, expect, it } from 'vitest';
+import { parsePrefill } from './prefill';
+
+describe('/buy with no parameters', () => {
+  it('renders a complete working page, not an error', () => {
+    const prefill = parsePrefill({});
+
+    expect(prefill.modelCode).toBeNull();
+    expect(prefill.colourCode).toBeNull();
+    expect(prefill.intent).toBe('undecided');
+    expect(prefill.dropped).toEqual([]);
+  });
+});
+
+describe('arriving from a product page', () => {
+  it('preselects the model and colour', () => {
+    const prefill = parsePrefill({
+      model: 'nexus-ex-plus',
+      colour: 'carbon-knight',
+      intent: 'buy',
+      src: 'product_hero',
+    });
+
+    expect(prefill.modelCode).toBe('nexus-ex-plus');
+    expect(prefill.colourCode).toBe('carbon-knight');
+    expect(prefill.intent).toBe('buy');
+    expect(prefill.src).toBe('product_hero');
+  });
+
+  it('accepts the American spelling of colour', () => {
+    const prefill = parsePrefill({ model: 'nexus-ex-plus', color: 'carbon-knight' });
+    expect(prefill.colourCode).toBe('carbon-knight');
+  });
+});
+
+describe('invalid values are dropped silently', () => {
+  it('falls back to no preselection for an unknown model', () => {
+    const prefill = parsePrefill({ model: 'foo' });
+
+    expect(prefill.modelCode).toBeNull();
+    expect(prefill.dropped).toContain('model=foo');
+  });
+
+  it('drops a colour the model does not come in', () => {
+    const prefill = parsePrefill({ model: 'nexus-ex-plus', colour: 'ocean-blue' });
+
+    expect(prefill.modelCode).toBe('nexus-ex-plus');
+    expect(prefill.colourCode).toBeNull();
+    expect(prefill.dropped).toContain('colour=ocean-blue');
+  });
+
+  it('drops a colour that arrives without a model', () => {
+    const prefill = parsePrefill({ colour: 'carbon-knight' });
+    expect(prefill.colourCode).toBeNull();
+  });
+
+  it('falls back to undecided for a nonsense intent', () => {
+    const prefill = parsePrefill({ intent: 'steal' });
+
+    expect(prefill.intent).toBe('undecided');
+    expect(prefill.dropped).toContain('intent=steal');
+  });
+});
+
+describe('attribution', () => {
+  it('collects every utm parameter', () => {
+    const prefill = parsePrefill({
+      utm_source: 'google',
+      utm_medium: 'cpc',
+      utm_campaign: 'nexus-launch',
+      gclid: 'abc123',
+      fbclid: 'xyz789',
+    });
+
+    expect(prefill.utm).toEqual({
+      utm_source: 'google',
+      utm_medium: 'cpc',
+      utm_campaign: 'nexus-launch',
+    });
+    expect(prefill.gclid).toBe('abc123');
+    expect(prefill.fbclid).toBe('xyz789');
+  });
+
+  it('keeps the whole query string, including what it could not parse', () => {
+    // The backstop for attribution questions asked a year from now.
+    const prefill = parsePrefill({
+      model: 'foo',
+      some_partner_param: 'kept',
+      intent: 'nonsense',
+    });
+
+    expect(prefill.sourceRaw).toEqual({
+      model: 'foo',
+      some_partner_param: 'kept',
+      intent: 'nonsense',
+    });
+  });
+
+  it('leaves utm null rather than empty when there is none', () => {
+    expect(parsePrefill({ model: 'nexus' }).utm).toBeNull();
+  });
+});
+
+describe('hostile input', () => {
+  it('takes the first value when a parameter is repeated', () => {
+    const prefill = parsePrefill({ model: ['nexus-ex-plus', 'primus'] });
+    expect(prefill.modelCode).toBe('nexus-ex-plus');
+  });
+
+  it('truncates an absurdly long value rather than storing it', () => {
+    const prefill = parsePrefill({ gclid: 'x'.repeat(5000) });
+    expect(prefill.gclid).toHaveLength(255);
+  });
+
+  it('treats whitespace-only values as absent', () => {
+    const prefill = parsePrefill({ src: '   ', gclid: '' });
+    expect(prefill.src).toBeNull();
+    expect(prefill.gclid).toBeNull();
+  });
+});
