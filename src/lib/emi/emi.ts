@@ -1,5 +1,19 @@
 /**
- * EMI calculation, in-journey variant.
+ * EMI calculation.
+ *
+ * NOT WIRED INTO THE UI, DELIBERATELY. Nothing in the buy journey calls this.
+ *
+ * The decision (2026-10-15): we do not quote instalments. The customer picks
+ * "Pay by EMI", we redirect, and Juspay's page shows the real lenders,
+ * tenures and rates. Everything below computed off INDICATIVE_ANNUAL_RATE,
+ * which is a placeholder nobody at Ampere, TVS Credit or Juspay supplied — so
+ * every figure it produced was invented, and a monthly number that disagrees
+ * with the payment page costs more trust than showing none.
+ *
+ * Kept rather than deleted for two reasons: if Finance ever supplies a real
+ * rate card this is the calculator, already tested; and EMI_VS_LOAN_NOTE
+ * below records a distinction that still matters wherever both products are
+ * named.
  *
  * Journey document section 02: this exists to set expectation, not to approve
  * credit. It never applies for anything and never promises a rate. Every

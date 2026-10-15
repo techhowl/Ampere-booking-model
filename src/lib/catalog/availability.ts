@@ -1,8 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { MODELS, type Colour } from '@/lib/catalog/catalog';
 import { getAvailable, STALE_AFTER_DAYS } from '@/lib/inventory/inventory';
-import { formatRupees, resolvePrice, toMoneyView, type MoneyView } from '@/lib/pricing/price';
-import { MIN_DOWN_PAYMENT_RATIO, lowestInstalment } from '@/lib/emi/emi';
+import { resolvePrice, toMoneyView, type MoneyView } from '@/lib/pricing/price';
 
 /**
  * The catalog as the buy journey needs it: every model, its colours, its price
@@ -22,11 +21,15 @@ export interface ModelAvailability {
     exShowroom: MoneyView;
     rtoCharges: MoneyView;
     onRoad: MoneyView;
-    /**
-     * The "EMIs start at ... p/m" line the design puts on every model card.
-     * Indicative, computed from the interim rate table — never an approval.
+    /*
+     * There is deliberately no emiFrom here.
+     *
+     * We do not quote instalments. Juspay owns the EMI journey end to end:
+     * the customer picks EMI, we redirect, and their page shows the real
+     * lenders, tenures and rates. Any figure we computed on this side would be
+     * from a placeholder rate table, and a monthly number that disagrees with
+     * the one on the payment page is worse than no number at all.
      */
-    emiFrom: MoneyView;
     /** Null means the partial payment option does not render. */
     partial: { mode: string; amount: MoneyView; balance: MoneyView } | null;
   } | null;
@@ -94,7 +97,6 @@ async function describeModel(
           exShowroom: toMoneyView(price.exShowroom),
           rtoCharges: toMoneyView(price.rtoCharges),
           onRoad: toMoneyView(price.onRoad),
-          emiFrom: emiFromView(price.onRoad.toNumber()),
           partial: price.partial
             ? {
                 mode: price.partial.mode,
@@ -110,16 +112,6 @@ async function describeModel(
     // No price means no sale, however much stock sits in the warehouse.
     purchasable: inStock && price !== null,
   };
-}
-
-/**
- * The lowest instalment across tenures, at the minimum down payment. This is
- * the headline figure, and it is also the most expensive option overall — the
- * EMI widget shows the total so that trade-off is visible.
- */
-function emiFromView(onRoad: number) {
-  const quote = lowestInstalment(onRoad, Math.round(onRoad * MIN_DOWN_PAYMENT_RATIO));
-  return { amount: quote.monthlyInstalment, display: formatRupees(quote.monthlyInstalment) };
 }
 
 export { STALE_AFTER_DAYS };

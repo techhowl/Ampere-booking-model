@@ -210,9 +210,8 @@ export function BuyJourney({ prefill, attribution }: Props) {
                 {price ? price.exShowroom.display : '—'}
               </p>
               <p className="mt-1 text-[12px] text-amp-muted">
-                {price
-                  ? `EMIs start at ${price.emiFrom.display} p/m`
-                  : 'Enter your pincode for pricing'}
+                {/* No instalment figure — Juspay quotes EMI, we do not. */}
+                {price ? 'Ex-showroom · EMI available' : 'Enter your pincode for pricing'}
               </p>
             </div>
             <p className="text-right text-[12px] leading-snug text-amp-muted">

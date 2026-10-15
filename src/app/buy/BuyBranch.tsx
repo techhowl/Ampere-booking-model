@@ -5,9 +5,7 @@ import type { ModelAvailability } from '@/lib/catalog/availability';
 import type { LeadCreatedResponse } from '@/lib/schemas/lead';
 import type { CreatedOrderResponse, PaymentTypeCode } from '@/lib/schemas/order';
 import { Checkbox, PaymentTrust, PrimaryButton, Section } from '@/components/ui';
-import { formatRupees } from '@/lib/pricing/price';
 import { ArrowLeftIcon, CheckIcon } from '@/components/Brand';
-import { EmiWidget } from './EmiWidget';
 
 /**
  * The Buy Now branch, as laid out in the journey document section 03:
@@ -33,11 +31,6 @@ interface Props {
 export function BuyBranch({ lead, model, colourCode, onBack }: Props) {
   const [paymentType, setPaymentType] = useState<PaymentTypeCode>('partial');
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [emi, setEmi] = useState<{
-    tenureMonths: number;
-    downPayment: number;
-    monthly: number;
-  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,13 +64,14 @@ export function BuyBranch({ lead, model, colourCode, onBack }: Props) {
     {
       id: 'emi',
       title: 'Pay by EMI',
-      // Follows the widget the moment the customer touches it, so the figure
-      // on the option is the one they just chose — not a "from" price computed
-      // at a down payment they never selected.
-      amount: emi ? `${formatRupees(emi.monthly)}/mo` : `${price.emiFrom.display}/mo`,
-      blurb: emi
-        ? `${emi.tenureMonths} months after ${formatRupees(emi.downPayment)} down. Indicative, subject to approval`
-        : 'Instalments, chosen at checkout. Indicative, subject to approval',
+      /*
+       * No monthly figure. Juspay runs the EMI journey — their page shows the
+       * real lenders, tenures and rates, and we would only be guessing. A
+       * number here that differs from the one at checkout costs more trust
+       * than showing none.
+       */
+      amount: 'At checkout',
+      blurb: 'Choose your plan and tenure on the payment page',
     },
   ];
 
@@ -92,9 +86,9 @@ export function BuyBranch({ lead, model, colourCode, onBack }: Props) {
           modelCode: model.code,
           colourCode,
           paymentType,
-          // Recorded for disputes — what the widget showed at the moment of
-          // order. It is never what we charge.
-          emiContext: paymentType === 'emi' ? emi : null,
+          // Nothing to record: we no longer quote an instalment, so there is
+          // no figure the customer could later say they were shown.
+          emiContext: null,
         }),
       });
 
@@ -145,12 +139,13 @@ export function BuyBranch({ lead, model, colourCode, onBack }: Props) {
         </div>
       </Section>
 
-      {/* 2. EMI widget, in-journey variant */}
-      <EmiWidget
-        onRoadPrice={price.onRoad.amount}
-        defaultOpen={paymentType === 'emi'}
-        onChange={setEmi}
-      />
+      {/* 2. What happens after the button, said before they press it. */}
+      {paymentType === 'emi' && (
+        <p className="amp-rise rounded-2xl border border-amp-accent/30 bg-amp-accent-tint px-4 py-3 text-[13px] leading-relaxed text-amp-ink">
+          You&apos;ll choose your EMI plan, lender and tenure on the secure payment page. Approval
+          is decided there.
+        </p>
+      )}
 
       {/* 3. Optional add-ons — awaiting the list from Ampere */}
       <p className="rounded-2xl border border-dashed border-amp-line bg-amp-card px-4 py-3 text-[12px] leading-relaxed text-amp-muted">
@@ -258,8 +253,8 @@ export function BuyBranch({ lead, model, colourCode, onBack }: Props) {
 
       {paymentType === 'emi' && (
         <p className="rounded-2xl bg-amp-card px-4 py-3 text-[12px] leading-relaxed text-amp-muted">
-          The instalment above is indicative. Juspay confirms your actual plan, rate and
-          eligibility on the next screen — that is where the EMI is agreed, not here.
+          Your plan, rate and eligibility are decided by the lender on the next screen. Nothing is
+          agreed here.
         </p>
       )}
 

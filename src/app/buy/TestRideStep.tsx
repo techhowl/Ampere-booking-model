@@ -7,7 +7,6 @@ import { HELP_TOPICS, HELP_TOPIC_LABELS } from '@/lib/schemas/test-ride';
 import type { OfferedDay } from '@/lib/test-rides/slots';
 import { Checkbox, Pill, PrimaryButton, Section } from '@/components/ui';
 import { ArrowLeftIcon } from '@/components/Brand';
-import { EmiWidget } from './EmiWidget';
 
 /**
  * The test ride branch: mode, date, slot, help topics.
@@ -226,10 +225,17 @@ export function TestRideStep({ lead, model, colourCode, onBooked, onBack }: Prop
         </div>
       </Section>
 
-      {/* Picking Financing opens the widget, rather than filing the signal away. */}
-      {wantsFinancing && model.price && (
-        <div className="amp-rise">
-          <EmiWidget onRoadPrice={model.price.onRoad.amount} defaultOpen />
+      {/*
+        Picking Financing does something, rather than filing the signal away —
+        but what it does is set an expectation, not quote a rate. We do not
+        know this customer's lender, and the dealer will.
+      */}
+      {wantsFinancing && (
+        <div className="amp-rise rounded-2xl border border-amp-accent/30 bg-amp-accent-tint px-4 py-3">
+          <p className="text-[13px] leading-relaxed text-amp-ink">
+            We&apos;ll have someone go through the finance options with you on the day — EMI plans,
+            tenures and what you&apos;d need to bring.
+          </p>
         </div>
       )}
 

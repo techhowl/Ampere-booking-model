@@ -203,6 +203,83 @@ nothing about.
 
 ---
 
+## 6a. The return URL is signed — and we still do not trust it
+
+Juspay's "Handle Payment Response" page shows the return carrying:
+
+```
+status_id=21&status=CHARGED&order_id=...&signature=...&signature_algorithm=HMAC-SHA256
+```
+
+So there *is* an HMAC — on the browser return, not on the webhook. The HMAC
+assumption in the original client was in the right family and the wrong place.
+
+This changes nothing about our design, and Juspay agree: their own page calls a
+server-to-server Order Status call **mandatory** for determining final status.
+We read exactly one field from the return — `order_id`, to know which order to
+look up — and everything displayed comes from our own record after resolution.
+
+Verifying the signature would be cheap defence in depth, but it buys little
+when the only field we consume is already treated as untrusted input.
+
+What *did* need fixing is that `order_id` was the only thing standing between a
+stranger and an order record. See §6b.
+
+## 6b. Access control on the status endpoint
+
+`GET /api/orders/{orderId}/status` had no authorisation. Given an order id it
+returned the amount charged, the amount paid, the payment type, the model and
+colour, and the dealer's name and phone — for any order, to anyone.
+
+Order ids are `AMP-{base36 timestamp}-{5 random}`. The timestamp half is
+guessable to within a narrow window, leaving about 60 million combinations on
+the random half: not trivially brute-forced, and not a secret worth resting a
+payment record on either. Juspay also puts the id in the return URL, where it
+is visible to the customer, to their browser history, and to anything that sees
+the URL.
+
+The route now requires the continuity cookie and matches `order.leadId` against
+the session. A mismatch returns 404, not 403 — whether an order exists is
+itself worth not confirming.
+
+Safe because the cookie is `SameSite=Lax`, which survives the top-level
+navigation back from Juspay, and because the page calls this route same-origin.
+
+## 6c. Cancel and Refund — documented, deliberately not built
+
+**Cancel Order** — `POST /merchants/{merchant_id}/order/{order_id}/cancel`,
+body `{ cancel_reason }`. Kills an active payment link. Only works on an
+`ACTIVE` order and cannot be undone.
+
+This is the missing half of a real safety property. We hold a unit for fifteen
+minutes; when that hold expires we release the stock — but the Juspay payment
+link stays live, so a customer could pay for a scooter we have just given to
+someone else.
+
+It is not built because the job that would call it does not exist either:
+`expireStale()` is written and tested but **nothing schedules it**, so holds
+never actually expire in production today. Both halves want doing together,
+and the scheduling half touches the inventory module the spec fixes.
+
+**Refund Order** — `POST /orders/{order_id}/refunds`, with a `unique_request_id`
+(alphanumeric, under 21 characters) that is what stops a double refund.
+Partial refunds supported; `CHARGED` orders only; refunds queue at Juspay for
+up to 15 minutes before reaching the gateway.
+
+Not built because there is no cancellation journey to attach it to, and Legal
+has not supplied cancellation terms. Worth knowing it is a single call when
+they do.
+
+## 6d. Opening the hosted page
+
+Juspay support two ways: navigate the browser to `payment_links.web`, or embed
+it in an iframe with `allow="payment *;"` and at least 700px of width.
+
+Our plain redirect is the supported path and is what we want — the hosted page
+is Juspay's liability boundary, and an iframe muddies it. One warning from
+their docs worth recording: **never open the payment URL in an Android or iOS
+webview**, because UPI intent does not work there.
+
 ## 7. What is still outstanding
 
 Down from eleven items to five.
@@ -210,9 +287,14 @@ Down from eleven items to five.
 | # | Ask | Blocks |
 |---|---|---|
 | 1 | **Merchant ID and `payment_page_client_id`** | Every API call. The API key we can self-serve. |
-| 2 | **Is Capture required for full payment**, or only the consumer-finance flow? | Whether `AUTHORIZED` is on the happy path for card and UPI, or only for loans |
-| 3 | **`CF_LSP` or `CF_EMI` on our account** | Whether the EMI button leads to a ~6.99% TVS loan or 13–16% card EMI. A labelling problem with a customer-complaint ending |
-| 4 | **An EMI plans API** we can call before redirect | The page currently shows a monthly figure from a placeholder rate table in `src/lib/emi/emi.ts`. Either we get real plans, or we stop showing a number |
+| 2 | **Are the sandbox credentials separate** from production, or is it one API key against two base URLs? | Whether "swap the host" is the whole story |
+| 3 | **Is Capture required for full payment**, or only the consumer-finance flow? | Whether `AUTHORIZED` sits on the happy path for card and UPI, or only for loans |
+| 4 | **`CF_LSP` or `CF_EMI` on our account** | Which product the EMI button opens. Ampere advertises ~6.99%, which is the TVS loan; card EMI is 13–16%. A labelling problem with a customer-complaint ending |
 | 5 | **May `order_id` contain hyphens?** | One sandbox call settles it |
 
-Items 2–4 are commercial or product questions; only Juspay can answer 1 and 5.
+**No longer outstanding: the EMI plans API.** We decided not to quote
+instalments at all — the customer picks "Pay by EMI", we redirect, and Juspay's
+page shows the real lenders and rates. Item 4 still matters for what we *call*
+the option, but nothing on our side needs a rate any more.
+
+Only Juspay can answer 1, 2 and 5. Items 3 and 4 are commercial.

@@ -137,9 +137,9 @@ function VariantCard({
             {model.price ? `${model.price.exShowroom.display}*` : 'On enquiry'}
           </span>
           {model.price && (
-            <span className="mt-0.5 block text-[12px] text-amp-muted">
-              EMIs start at {model.price.emiFrom?.display ?? '—'} p/m
-            </span>
+            /* "EMI available", not "EMIs from ₹X" — the rate is the lender's
+               to quote, on Juspay's page. */
+            <span className="mt-0.5 block text-[12px] text-amp-muted">Ex-showroom</span>
           )}
         </span>
       </div>
