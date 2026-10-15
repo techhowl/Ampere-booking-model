@@ -4,6 +4,13 @@
 [hypercredit-integration-steps.md](./hypercredit-integration-steps.md).
 **Status:** assessment. Nothing in `src/lib/juspay/` has been changed yet.
 
+> **Update, 2026-10-15.** Juspay sent the public Hyper Checkout documentation,
+> which answers most of section 4 below. See
+> [hyper-checkout-findings.md](./hyper-checkout-findings.md) for what changed
+> and what is still open. The biggest correction: **webhooks are authenticated
+> with HTTP Basic auth, not a signature**, so item 1 below is answered and the
+> implementation has been rewritten.
+
 Build spec §9 listed three things we needed from Juspay:
 
 > confirmation that the webhook exists and its signature scheme, the status API

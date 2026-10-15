@@ -5,6 +5,7 @@ import {
   resolveOnReturn,
   type StoredOrder,
 } from './juspay';
+import { RealJuspayClient } from './real-client';
 
 /**
  * These five cases are the ones that hurt in production. Each is cheap to
@@ -86,10 +87,62 @@ describe('5. out-of-order webhook', () => {
   });
 });
 
-describe('webhook signature', () => {
-  it('rejects an unsigned payload', () => {
+describe('webhook authenticity', () => {
+  it('rejects an unauthenticated payload', () => {
     const client = new FakeJuspayClient();
-    expect(client.verifyWebhookSignature('{}', 'nonsense')).toBe(false);
-    expect(client.verifyWebhookSignature('{}', 'valid-signature')).toBe(true);
+    expect(client.verifyWebhook('{}', 'nonsense')).toBe(false);
+    expect(client.verifyWebhook('{}', 'valid-signature')).toBe(true);
+  });
+});
+
+describe('RealJuspayClient webhook auth', () => {
+  const config = {
+    apiKey: 'test-key',
+    merchantId: 'ampere',
+    paymentPageClientId: 'ampere',
+    baseUrl: 'https://sandbox.juspay.in',
+    webhookUrl: 'https://example.com/api/webhooks/juspay',
+    webhookUsername: 'ampere_hook',
+    webhookPassword: 'a-long-random-password',
+  };
+
+  const client = new RealJuspayClient(config, async () => {
+    throw new Error('context not needed');
+  });
+
+  const valid = `Basic ${Buffer.from('ampere_hook:a-long-random-password').toString('base64')}`;
+
+  it('accepts the configured basic credential', () => {
+    expect(client.verifyWebhook('{}', valid)).toBe(true);
+  });
+
+  it('tolerates surrounding whitespace', () => {
+    expect(client.verifyWebhook('{}', `  ${valid}  `)).toBe(true);
+  });
+
+  it('rejects a wrong password', () => {
+    const wrong = `Basic ${Buffer.from('ampere_hook:guess').toString('base64')}`;
+    expect(client.verifyWebhook('{}', wrong)).toBe(false);
+  });
+
+  it('rejects a missing header', () => {
+    expect(client.verifyWebhook('{}', '')).toBe(false);
+  });
+
+  it('rejects the credential unencoded', () => {
+    expect(client.verifyWebhook('{}', 'Basic ampere_hook:a-long-random-password')).toBe(false);
+  });
+
+  it('refuses to authenticate when no password is configured', () => {
+    const unconfigured = new RealJuspayClient(
+      { ...config, webhookUsername: '', webhookPassword: '' },
+      async () => {
+        throw new Error('context not needed');
+      },
+    );
+    // An empty config must never accept an empty header as a match.
+    expect(unconfigured.verifyWebhook('{}', `Basic ${Buffer.from(':').toString('base64')}`)).toBe(
+      false,
+    );
   });
 });

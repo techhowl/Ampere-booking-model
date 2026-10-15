@@ -14,7 +14,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "juspay:smoke": "tsx scripts/juspay-smoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",

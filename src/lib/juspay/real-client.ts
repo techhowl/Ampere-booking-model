@@ -1,4 +1,4 @@
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type {
   CreateOrderInput,
   CreateOrderResult,
@@ -15,13 +15,20 @@ import type {
  * hosted page, and they handle everything from there. No card details reach
  * this codebase, by design and by compliance.
  *
- * NOT YET VERIFIED AGAINST A LIVE ACCOUNT. Three things are still outstanding
- * from Juspay and are marked VERIFY below:
- *   - the webhook signature scheme
- *   - the exact Order Status API response shape
- *   - sandbox credentials to test any of it
+ * Built against two Juspay sources, which do not fully agree:
+ *   - Hyper Checkout (web): /session, /orders/{id}, auth and webhook docs.
+ *     This is the authority for transport — headers, status vocabulary and
+ *     how a webhook is authenticated.
+ *   - Hypercredit: the consumer-finance extensions on the same /session call
+ *     — order_basket, payment_rules, dealer metadata, the TVS Credit journey.
  *
- * Until those arrive `getJuspayClient()` returns the fake. Nothing here runs.
+ * NOT YET RUN AGAINST A LIVE ACCOUNT. What is still outstanding:
+ *   - credentials (API key, merchant id, payment_page_client_id)
+ *   - whether order_id may contain hyphens; Juspay says "alphanumeric"
+ *   - customer_email is mandatory and our form does not collect one
+ *   - whether full payment also requires an explicit Capture call
+ *
+ * Until credentials arrive `getJuspayClient()` returns the fake.
  */
 
 const TIMEOUT_MS = 15_000;
@@ -34,14 +41,30 @@ export interface JuspayConfig {
   paymentPageClientId: string;
   /** https://sandbox.juspay.in or https://api.juspay.in */
   baseUrl: string;
-  /** Where Juspay's servers notify us. Absolute and publicly reachable. */
+  /** Where Juspay's servers notify us. Absolute, HTTPS, publicly reachable. */
   webhookUrl: string;
-  /** Verifies that a webhook genuinely came from Juspay. */
-  webhookSecret: string;
+  /**
+   * The Basic-auth pair we set on the Juspay dashboard, under
+   * Payments → Settings → Webhook. Juspay sends it back on every webhook and
+   * it is the whole of our authenticity check — guard it like a password.
+   *
+   * Juspay rejects these characters in the username: @!#$%&'*+-/=?^_.{|}~
+   */
+  webhookUsername: string;
+  webhookPassword: string;
 }
 
 export interface OrderContext {
   customerId: string;
+  /**
+   * Juspay marks customer_email mandatory on /session. Our form deliberately
+   * asks for name, phone and pincode only, so this is a synthetic per-order
+   * address unless Ampere decides to collect a real one.
+   *
+   * Consequence to be aware of: Juspay's own receipt goes nowhere. Our
+   * confirmation is then the only thing the customer receives.
+   */
+  customerEmail: string;
   modelName: string;
   /** Ex-showroom, in rupees. */
   productPrice: number;
@@ -114,11 +137,28 @@ export class RealJuspayClient implements JuspayClient {
     private readonly contextFor: (orderId: string) => Promise<OrderContext>,
   ) {}
 
-  private headers(extra: Record<string, string> = {}): Record<string, string> {
+  /**
+   * Juspay authenticates server calls with HTTP Basic, where the API key is
+   * the USERNAME and the password is empty — hence the trailing colon. Sending
+   * the bare key (which an earlier draft of this file did) fails with 401.
+   */
+  private authorization(): string {
+    return `Basic ${Buffer.from(`${this.config.apiKey}:`).toString('base64')}`;
+  }
+
+  /**
+   * `x-routing-id` shards traffic on Juspay's side and must be the same value
+   * for every call about one customer. `x-merchantid` is required on every
+   * endpoint.
+   */
+  private headers(routingId: string, extra: Record<string, string> = {}): Record<string, string> {
     return {
-      Authorization: this.config.apiKey,
+      Authorization: this.authorization(),
+      'x-merchantid': this.config.merchantId,
+      'x-routing-id': routingId,
       'Content-Type': 'application/json',
-      // Mandatory per the document, and our idempotency handle on their side.
+      // Mandatory per the Hypercredit document, and our idempotency handle on
+      // their side.
       'X-Request-Id': randomUUID(),
       ...extra,
     };
@@ -140,6 +180,7 @@ export class RealJuspayClient implements JuspayClient {
       description: `Ampere ${ctx.modelName}`,
       customer_id: ctx.customerId,
       customer_phone: input.customerPhone,
+      customer_email: ctx.customerEmail,
       payment_page_client_id: this.config.paymentPageClientId,
       action: 'paymentPage',
       return_url: input.returnUrl,
@@ -211,7 +252,7 @@ export class RealJuspayClient implements JuspayClient {
       },
     };
 
-    const response = await this.post('/session', body);
+    const response = await this.post('/session', body, ctx.customerId);
 
     const links = response.payment_links as Record<string, string> | undefined;
     const redirectUrl = links?.web;
@@ -227,15 +268,25 @@ export class RealJuspayClient implements JuspayClient {
   }
 
   /**
-   * Order Status API — the reconciler for when a customer returns before the
-   * webhook lands.
+   * Order Status API — GET /orders/{order_id}. The reconciler for when a
+   * customer returns before the webhook lands.
    *
-   * VERIFY: the document links to generic documentation rather than giving the
-   * response shape. The field reads below are our best reading of it and need
-   * confirming against a real sandbox call.
+   * Shape confirmed against Juspay's Hyper Checkout documentation: `status`
+   * carries the vocabulary normaliseStatus maps, `amount` is the order total
+   * and `payment_method` the instrument used.
    */
   async getOrderStatus(orderId: string): Promise<OrderStatusResult> {
-    const response = await this.get(`/orders/${encodeURIComponent(orderId)}`);
+    /* Routing must stay consistent per customer, so reuse the id the session
+       was created with. A context lookup should not be able to break status
+       resolution, so fall back to the order id. */
+    let routingId = orderId;
+    try {
+      routingId = (await this.contextFor(orderId)).customerId;
+    } catch {
+      // Keep the fallback.
+    }
+
+    const response = await this.get(`/orders/${encodeURIComponent(orderId)}`, routingId);
 
     const raw = typeof response.status === 'string' ? response.status : 'NEW';
     const amount = response.amount;
@@ -251,45 +302,60 @@ export class RealJuspayClient implements JuspayClient {
   }
 
   /**
-   * VERIFY — THIS IS THE ONE THAT MATTERS.
+   * Is this webhook genuinely from Juspay?
    *
-   * Juspay has not supplied the signature scheme. The implementation below
-   * assumes HMAC-SHA256 over the raw body, hex-encoded, which is the common
-   * shape — but assuming is not good enough for the check that decides whether
-   * a payment notification is genuine.
+   * There is no signature. Juspay's documented scheme is plain HTTP Basic
+   * auth: they send `Authorization: Basic base64(username:password)` using the
+   * pair we configured on their dashboard, and our only job is to compare it
+   * with what we expect.
    *
-   * Until Juspay confirm, this client must not be used in production. Spec 15:
-   * unsigned payloads are logged and dropped.
+   * That is weaker than an HMAC — the credential is replayable by anyone who
+   * sees it — which is exactly why the endpoint must be HTTPS-only and the
+   * password must be long and random. Spec 15: unverified payloads are
+   * recorded and dropped, never acted on.
+   *
+   * `rawBody` is unused and kept so the interface can accommodate a signature
+   * scheme later without a change at every call site.
    */
-  verifyWebhookSignature(rawBody: string, signature: string): boolean {
-    if (!signature || !this.config.webhookSecret) return false;
+  verifyWebhook(_rawBody: string, authHeader: string): boolean {
+    const { webhookUsername, webhookPassword } = this.config;
+    if (!authHeader || !webhookUsername || !webhookPassword) return false;
 
-    const expected = createHmac('sha256', this.config.webhookSecret)
-      .update(rawBody, 'utf8')
-      .digest('hex');
+    const expected = `Basic ${Buffer.from(`${webhookUsername}:${webhookPassword}`).toString('base64')}`;
 
-    const a = Buffer.from(expected);
-    const b = Buffer.from(signature.trim().toLowerCase());
+    /* Constant-time compare. Lengths are compared first because
+       timingSafeEqual throws on a mismatch, and the length of a rejected
+       credential is not a useful secret. */
+    const a = Buffer.from(expected, 'utf8');
+    const b = Buffer.from(authHeader.trim(), 'utf8');
     if (a.length !== b.length) return false;
     return timingSafeEqual(a, b);
   }
 
   /* ---------------------------------------------------------------- */
 
-  private async post(path: string, body: unknown): Promise<Record<string, unknown>> {
+  private async post(
+    path: string,
+    body: unknown,
+    routingId: string,
+  ): Promise<Record<string, unknown>> {
     const res = await fetch(`${this.config.baseUrl}${path}`, {
       method: 'POST',
-      headers: this.headers(),
+      headers: this.headers(routingId),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     return this.parse(res, path);
   }
 
-  private async get(path: string): Promise<Record<string, unknown>> {
+  private async get(path: string, routingId: string): Promise<Record<string, unknown>> {
     const res = await fetch(`${this.config.baseUrl}${path}`, {
       method: 'GET',
-      headers: this.headers({ 'x-merchantid': this.config.merchantId }),
+      // The Order Status API is form-encoded, unlike /session. Sending
+      // application/json here gets the request rejected.
+      headers: this.headers(routingId, {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     return this.parse(res, path);
@@ -324,18 +390,60 @@ export class RealJuspayClient implements JuspayClient {
  */
 function normaliseStatus(raw: string): JuspayStatus {
   switch (raw.toUpperCase()) {
-    case 'CHARGED':
+    /* Money has moved. */
+    case 'CHARGED': // 21
       return 'CHARGED';
-    case 'AUTHORIZATION_FAILED':
-    case 'AUTHENTICATION_FAILED':
-    case 'JUSPAY_DECLINED':
+
+    /* Over, and no money moved. Each of these is a dead end: the customer
+       must start a new attempt, so saying "failed" is both true and useful. */
+    case 'AUTHORIZATION_FAILED': // 27 — bank refused
+    case 'AUTHENTICATION_FAILED': // 26 — customer abandoned the OTP/3DS step
+    case 'JUSPAY_DECLINED': // 22 — integration error on our side
+    case 'CAPTURE_FAILED': // 34
+    case 'VOID_FAILED': // 35
+    case 'VOIDED': // 31 — authorisation released
       return 'AUTHORIZATION_FAILED';
-    case 'AUTHORIZED':
-    case 'VBV_SUCCESSFUL':
-    case 'PENDING_VBV':
-    case 'STARTED':
+
+    /* In flight. Keep polling; show "confirming your payment". */
+    case 'PENDING_VBV': // 23 — 3DS/VKYC in progress
+    case 'AUTHORIZING': // 28 — bank has not answered
+    case 'STARTED': // 20
+    case 'CAPTURE_INITIATED': // 33
+    case 'VOID_INITIATED': // 32
+    case 'AUTO_REFUNDED': // 36 — refund in flight after a timeout
+    case 'VBV_SUCCESSFUL': // identity check done, money untouched
       return 'PENDING';
+
+    /*
+     * AUTHORIZED (25) — funds held, NOT captured. In an auth-and-capture flow
+     * this obliges us to call Capture; until we do, no money has moved.
+     * Mapping it to PENDING is deliberately conservative: it can never show a
+     * customer a confirmation for money we have not taken.
+     *
+     * It is still not the right answer. PENDING means "wait and it will
+     * resolve itself", and this one will not — it waits on US. Making that
+     * visible needs an `authorized` member on ResolvedStatus, which is a
+     * change to the status resolution the spec fixes, so it is flagged in
+     * docs/juspay/integration-notes.md rather than made here.
+     *
+     * PARTIAL_CHARGED (37) — less was debited than the order asked for. Never
+     * treat it as paid: the amount check would be the only thing standing
+     * between a part-paid order and a delivered scooter.
+     *
+     * NOT_FOUND (40) — Juspay has no such order. Pending keeps us polling
+     * rather than failing an order that may simply not have reached them yet.
+     */
+    case 'AUTHORIZED':
+    case 'PARTIAL_CHARGED':
+    case 'NOT_FOUND':
+      return 'PENDING';
+
+    case 'NEW': // 10 — created, nothing attempted
+      return 'NEW';
+
     default:
+      /* An unknown status must never read as success or failure. NEW resolves
+         to pending, so a vocabulary change at Juspay degrades to polling. */
       return 'NEW';
   }
 }

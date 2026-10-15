@@ -6,10 +6,10 @@ import { RealJuspayClient, type JuspayConfig, type OrderContext } from './real-c
 /**
  * Which Juspay client the app uses.
  *
- * Flip `JUSPAY_ENABLED` to "true" once the credentials and the webhook
- * signature scheme arrive, and the real client takes over. Nothing else in the
- * application changes: the order route already redirects the customer to
- * whatever URL the client returns, and that URL becomes Juspay's hosted page.
+ * Flip `JUSPAY_ENABLED` to "true" once the credentials arrive and the real
+ * client takes over. Nothing else in the application changes: the order route
+ * already redirects the customer to whatever URL the client returns, and that
+ * URL becomes Juspay's hosted page.
  *
  * Until then the fake drives development, the test suite and the demo —
  * including the full status-resolution and reconciliation path.
@@ -55,6 +55,18 @@ async function contextFor(orderId: string): Promise<OrderContext> {
 
   return {
     customerId: order.leadId,
+    /*
+     * Juspay requires customer_email and our form does not ask for one. A
+     * per-order synthetic address keeps it unique and inert — it must never
+     * collide with a real mailbox, so the domain is one we control and the
+     * local part is the order id.
+     *
+     * JUSPAY_RECEIPT_DOMAIN exists so this can be pointed at a real inbox if
+     * Ampere decides it wants Juspay's receipts.
+     */
+    customerEmail: `order-${order.orderId.toLowerCase()}@${
+      process.env.JUSPAY_RECEIPT_DOMAIN ?? 'orders.ampere-electric.com'
+    }`,
     modelName: model?.name ?? order.modelCode,
     productPrice: price ? price.amountTotal.toNumber() : order.amountTotal.toNumber(),
     rtoCharges: price ? price.rtoCharges.toNumber() : 0,
@@ -77,7 +89,8 @@ export function getJuspayClient(): JuspayClient {
       paymentPageClientId: required('JUSPAY_PAYMENT_PAGE_CLIENT_ID'),
       baseUrl: (process.env.JUSPAY_BASE_URL ?? 'https://sandbox.juspay.in').replace(/\/$/, ''),
       webhookUrl: required('JUSPAY_WEBHOOK_URL'),
-      webhookSecret: required('JUSPAY_WEBHOOK_SECRET'),
+      webhookUsername: required('JUSPAY_WEBHOOK_USERNAME'),
+      webhookPassword: required('JUSPAY_WEBHOOK_PASSWORD'),
     };
     client = new RealJuspayClient(config, contextFor);
     return client;

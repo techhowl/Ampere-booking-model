@@ -38,7 +38,14 @@ export interface OrderStatusResult {
 export interface JuspayClient {
   createOrder(input: CreateOrderInput): Promise<CreateOrderResult>;
   getOrderStatus(orderId: string): Promise<OrderStatusResult>;
-  verifyWebhookSignature(rawBody: string, signature: string): boolean;
+  /**
+   * Is this webhook genuinely from Juspay?
+   *
+   * NOT a signature check. Juspay authenticates webhooks with HTTP Basic auth
+   * against a username and password we set on their dashboard, so `authHeader`
+   * is the raw `Authorization` header. See RealJuspayClient.verifyWebhook.
+   */
+  verifyWebhook(rawBody: string, authHeader: string): boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -89,8 +96,8 @@ export class FakeJuspayClient implements JuspayClient {
   }
 
   /** The fake accepts "valid-signature" and rejects everything else. */
-  verifyWebhookSignature(_rawBody: string, signature: string): boolean {
-    return signature === 'valid-signature';
+  verifyWebhook(_rawBody: string, authHeader: string): boolean {
+    return authHeader === 'valid-signature';
   }
 }
 

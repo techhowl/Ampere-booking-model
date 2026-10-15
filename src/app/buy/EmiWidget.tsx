@@ -9,7 +9,6 @@ import {
   calculateEmi,
   type Tenure,
 } from '@/lib/emi/emi';
-import { ChevronIcon } from '@/components/Brand';
 
 /**
  * The EMI widget, in-journey variant.
