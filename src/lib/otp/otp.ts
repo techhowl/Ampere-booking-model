@@ -44,6 +44,8 @@ export type OtpRequestOutcome =
       otpRef: string;
       expiresAt: Date;
       resendAfterSeconds: number;
+      /** The live code. Set ONLY when env.otpEchoEnabled. Never in production. */
+      echoCode?: string;
     }
   | ({ ok: false } & OtpRequestFailure);
 
@@ -154,7 +156,21 @@ export async function requestOtp(
     { kind: 'phone', subject: phoneHash, max: 1, windowSeconds: RESEND_COOLDOWN_SECONDS },
   ]);
 
-  return { ok: true, otpRef, expiresAt, resendAfterSeconds: RESEND_COOLDOWN_SECONDS };
+  return {
+    ok: true,
+    otpRef,
+    expiresAt,
+    resendAfterSeconds: RESEND_COOLDOWN_SECONDS,
+    /*
+     * Only ever populated outside production, and only when asked for — see
+     * env.otpEchoEnabled. Until an SMS provider exists, this is the only way a
+     * tester who is not reading the server console can get past this step.
+     *
+     * Deliberately decided here rather than at the route, so there is exactly
+     * one place in the codebase that can put a live code on the wire.
+     */
+    echoCode: env.otpEchoEnabled ? code : undefined,
+  };
 }
 
 export interface VerifyOtpParams {

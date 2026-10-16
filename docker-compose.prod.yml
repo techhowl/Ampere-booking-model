@@ -1,0 +1,89 @@
+# Ampere /buy — the droplet.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Four services. Caddy terminates TLS, because Juspay will not accept a plain
+# HTTP return_url and will not deliver a webhook to one either — HTTPS is a
+# functional requirement here, not a hardening nicety.
+#
+# Everything reads from deploy/.env.production. See deploy/README.md.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Not published. Only the app and the migrator reach it, over the compose
+    # network. A database on a public port is how a droplet gets emptied.
+    expose:
+      - '5432'
+
+  # One-shot. Runs to completion before the app is allowed to start, so the
+  # app never serves against a schema it does not expect.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: 'no'
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    command: ['node_modules/.bin/prisma', 'migrate', 'deploy']
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - deploy/.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - '3000'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      # The hostname Caddy issues a certificate for.
+      SITE_HOST: ${SITE_HOST}
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

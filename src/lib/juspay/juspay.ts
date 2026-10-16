@@ -39,6 +39,16 @@ export interface JuspayClient {
   createOrder(input: CreateOrderInput): Promise<CreateOrderResult>;
   getOrderStatus(orderId: string): Promise<OrderStatusResult>;
   /**
+   * Kill the hosted payment link.
+   *
+   * Called when a stock hold lapses. Releasing the unit without this leaves a
+   * live payment page for a scooter we have just given to someone else.
+   *
+   * Best effort by design: the stock release is the part that must happen, and
+   * an unreachable Juspay must not block it.
+   */
+  cancelOrder(orderId: string, reason: string): Promise<void>;
+  /**
    * Is this webhook genuinely from Juspay?
    *
    * NOT a signature check. Juspay authenticates webhooks with HTTP Basic auth
@@ -99,6 +109,13 @@ export class FakeJuspayClient implements JuspayClient {
   verifyWebhook(_rawBody: string, authHeader: string): boolean {
     return authHeader === 'valid-signature';
   }
+
+  async cancelOrder(orderId: string, reason: string): Promise<void> {
+    this.cancelled.set(orderId, reason);
+  }
+
+  /** What a test asserts against after an expiry sweep. */
+  readonly cancelled = new Map<string, string>();
 }
 
 /* ------------------------------------------------------------------ */

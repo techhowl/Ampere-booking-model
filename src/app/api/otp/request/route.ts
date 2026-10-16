@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { clientIp } from '@/lib/http/request';
 import { decryptPhone } from '@/lib/crypto/phone';
 import { SESSION_COOKIE, parseSession } from '@/lib/crypto/session';
-import { otpRequestSchema } from '@/lib/schemas/otp';
+import { otpRequestSchema, type OtpRequestResponse } from '@/lib/schemas/otp';
 import { requestOtp } from '@/lib/otp/otp';
 import { getSmsClient } from '@/lib/sms/sms';
 import { verifyTurnstile } from '@/lib/turnstile';
@@ -27,9 +27,19 @@ export const dynamic = 'force-dynamic';
 
 const ROUTE = 'POST /api/otp/request';
 
-/** Every shape this route can store and replay, so idempotency can type it. */
+/**
+ * Every shape this route can store and replay, so idempotency can type it.
+ *
+ * The success arm is the shared OtpRequestResponse rather than a second copy
+ * of the same fields — the client reads that type, and two definitions drift.
+ *
+ * Note for UAT: withIdempotency persists this body to Postgres, so when
+ * testCode is populated a live code is stored in plaintext. That is only ever
+ * true outside production (env.otpEchoEnabled), where the data is fake, but it
+ * is a second reason the production lock has to hold.
+ */
 type RequestBody =
-  | { otpRef: string; expiresAt: string; resendAfterSeconds: number; phoneLast4: string }
+  | OtpRequestResponse
   | { error: string; message: string; retryAfterSeconds?: number };
 
 export async function POST(request: NextRequest) {
@@ -102,6 +112,10 @@ export async function POST(request: NextRequest) {
               expiresAt: result.expiresAt.toISOString(),
               resendAfterSeconds: result.resendAfterSeconds,
               phoneLast4: lead.phoneLast4,
+              // Undefined unless env.otpEchoEnabled, which is false in
+              // production and requires OTP_ECHO_ENABLED to be set anywhere
+              // else. JSON.stringify drops the key entirely when undefined.
+              testCode: result.echoCode,
             },
           };
         }

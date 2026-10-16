@@ -23,6 +23,13 @@ export interface OtpRequestResponse {
   expiresAt: string;
   resendAfterSeconds: number;
   phoneLast4: string;
+  /**
+   * The live code, shown on screen instead of sent by SMS.
+   *
+   * Present only on UAT and only when OTP_ECHO_ENABLED is set — see
+   * env.otpEchoEnabled. Absent in production, always.
+   */
+  testCode?: string;
 }
 
 export interface OtpVerifyResponse {

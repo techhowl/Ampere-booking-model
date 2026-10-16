@@ -146,3 +146,11 @@ describe('RealJuspayClient webhook auth', () => {
     );
   });
 });
+
+describe('FakeJuspayClient cancel', () => {
+  it('records the cancellation so an expiry sweep can be asserted', async () => {
+    const client = new FakeJuspayClient();
+    await client.cancelOrder('AMP-TEST-1', 'Reservation expired');
+    expect(client.cancelled.get('AMP-TEST-1')).toBe('Reservation expired');
+  });
+});

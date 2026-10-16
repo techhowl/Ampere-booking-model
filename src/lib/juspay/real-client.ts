@@ -302,6 +302,40 @@ export class RealJuspayClient implements JuspayClient {
   }
 
   /**
+   * Cancel Order API — POST /merchants/{mid}/order/{order_id}/cancel.
+   *
+   * Only works while the order is ACTIVE, and cannot be undone. Juspay's own
+   * docs contradict themselves on the content type here (the header table says
+   * form-encoded, the body and examples are JSON); sending JSON, which is what
+   * their example does.
+   *
+   * Never throws. The caller is releasing stock, and that must happen whether
+   * or not Juspay is reachable — an order whose link outlives its hold is a
+   * problem, but an unreleased unit is a worse one.
+   */
+  async cancelOrder(orderId: string, reason: string): Promise<void> {
+    const path = `/merchants/${encodeURIComponent(this.config.merchantId)}/order/${encodeURIComponent(orderId)}/cancel`;
+
+    let routingId = orderId;
+    try {
+      routingId = (await this.contextFor(orderId)).customerId;
+    } catch {
+      // Keep the fallback.
+    }
+
+    try {
+      await this.post(path, { cancel_reason: reason }, routingId);
+    } catch (error) {
+      // An order that was never ACTIVE — already paid, already cancelled —
+      // returns an error, and that is a normal outcome of a sweep, not a fault.
+      console.warn('[juspay] cancel failed', {
+        orderId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
    * Is this webhook genuinely from Juspay?
    *
    * There is no signature. Juspay's documented scheme is plain HTTP Basic

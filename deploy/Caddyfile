@@ -1,0 +1,45 @@
+# TLS and reverse proxy for Ampere /buy.
+#
+# Caddy obtains and renews a Let's Encrypt certificate on its own, which is the
+# whole reason it is here: Juspay requires an HTTPS return_url and an HTTPS
+# webhook endpoint, so certificate expiry would take payments down.
+
+{$SITE_HOST} {
+	encode zstd gzip
+
+	# The droplet sits behind nothing else, so Caddy is the first hop and its
+	# view of the client IP is the real one. The app reads these for rate
+	# limiting and for the consent record.
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	header {
+		# This page takes payments and is embedded nowhere.
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Two years, and only safe because Caddy renews automatically.
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		# Nothing here needs a camera, a microphone or a location.
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(self)"
+		-Server
+	}
+
+	# The health endpoint is public but should never be cached by anything
+	# between us and a monitor.
+	@health path /api/health
+	header @health Cache-Control "no-store"
+
+	log {
+		output file /data/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		# Phone numbers travel in request bodies, never in a path, so request
+		# logging is safe — but keep it terse.
+		format json
+	}
+}

@@ -1,0 +1,22 @@
+# Keep the build context small and keep secrets out of it entirely.
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.example
+
+# Never ship these into an image.
+assets/
+docs/
+deploy/caddy_data
+deploy/caddy_config
+*.docx
+~$*
+
+# Test and tooling output
+coverage
+.vitest
+*.log
+.DS_Store
+Thumbs.db

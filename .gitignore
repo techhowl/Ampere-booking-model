@@ -17,6 +17,12 @@ dist/
 .env.*
 !.env.example
 
+# The droplet's real configuration. deploy/.env.production.example is the
+# template and is committed; the filled-in file never is.
+deploy/.env.production
+deploy/caddy_data/
+deploy/caddy_config/
+
 # testing
 coverage/
 

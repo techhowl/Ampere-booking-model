@@ -65,6 +65,37 @@ export const env = {
     return process.env.NODE_ENV === 'production';
   },
 
+  /**
+   * Which deployment this is: 'development' | 'uat' | 'production'.
+   *
+   * Distinct from NODE_ENV, which is 'production' on UAT too — UAT runs the
+   * same built image, and that is the point of it.
+   *
+   * Defaults to 'production' when unset, so a forgotten variable fails closed.
+   */
+  get appEnv(): 'development' | 'uat' | 'production' {
+    const value = process.env.APP_ENV;
+    if (value === 'development' || value === 'uat') return value;
+    return 'production';
+  },
+
+  /**
+   * Show the OTP to the person requesting it, instead of only sending it.
+   *
+   * Nobody can test this journey without the code, and until an SMS provider
+   * and a DLT template exist, no real handset receives one. The alternative is
+   * a tester reading it out of the server console, which rules out everyone
+   * who should actually be doing UAT.
+   *
+   * TWO locks, because one flag protecting a one-time password is not enough:
+   * APP_ENV must not be production, AND the echo must be asked for explicitly.
+   * Either alone does nothing.
+   */
+  get otpEchoEnabled(): boolean {
+    if (this.appEnv === 'production') return false;
+    return process.env.OTP_ECHO_ENABLED === 'true';
+  },
+
   /** Turnstile is inert until keys arrive; see the OTP route. */
   get turnstileSecret(): string | null {
     return process.env.TURNSTILE_SECRET || null;
