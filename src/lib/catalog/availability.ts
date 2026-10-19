@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { MODELS, type Colour } from '@/lib/catalog/catalog';
-import { getAvailable, STALE_AFTER_DAYS } from '@/lib/inventory/inventory';
+import { availabilityAcross, STALE_AFTER_DAYS } from '@/lib/inventory/inventory';
 import { resolvePrice, toMoneyView, type MoneyView } from '@/lib/pricing/price';
 
 /**
@@ -49,15 +49,25 @@ export interface ModelAvailability {
 /**
  * Without a region we still return the line-up — a customer who has not given a
  * pincode yet should see the scooters, just not prices or stock.
+ *
+ * `dealerCodes` is the dealers within range of this customer, nearest first.
+ * Stock is the sum across them, because any one of them can fulfil: the buy
+ * button should stay up while a showroom in range still has a unit, and go
+ * down the moment none of them does.
+ *
+ * An empty list is therefore a complete answer — nothing to sell from here.
  */
 export async function buildCatalog(
   prisma: PrismaClient,
   regionCode: string | null,
+  dealerCodes: string[] = [],
 ): Promise<ModelAvailability[]> {
   return Promise.all(
     [...MODELS]
       .sort((a, b) => a.sort - b.sort)
-      .map((model) => describeModel(prisma, model.code, model.name, [...model.colours], regionCode)),
+      .map((model) =>
+        describeModel(prisma, model.code, model.name, [...model.colours], regionCode, dealerCodes),
+      ),
   );
 }
 
@@ -67,6 +77,7 @@ async function describeModel(
   name: string,
   colours: Colour[],
   regionCode: string | null,
+  dealerCodes: string[],
 ): Promise<ModelAvailability> {
   if (!regionCode) {
     return {
@@ -83,10 +94,11 @@ async function describeModel(
 
   const [price, stock] = await Promise.all([
     resolvePrice(prisma, code, regionCode),
-    getAvailable(prisma, code, regionCode),
+    // Everything a dealer in range could sell this customer today.
+    availabilityAcross(prisma, code, dealerCodes),
   ]);
 
-  const inStock = stock.available > 0;
+  const inStock = stock.total > 0;
 
   return {
     code,
@@ -106,7 +118,7 @@ async function describeModel(
             : null,
         }
       : null,
-    available: stock.available,
+    available: stock.total,
     inStock,
     stale: stock.stale,
     // No price means no sale, however much stock sits in the warehouse.

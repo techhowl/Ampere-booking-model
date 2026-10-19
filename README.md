@@ -35,6 +35,7 @@ so they can be finished first:
 | `src/lib/crypto/session.ts` | Signed continuity cookie |
 | `src/lib/idempotency/` | `Idempotency-Key` interceptor for every mutating route |
 | `src/lib/dealers/resolve.ts` | Pincode to region and dealer, with fallback |
+| `src/lib/dealers/nearby.ts` | Up to three dealers within 15 km of a pincode, for the dealer step |
 | `src/lib/catalog/catalog.ts` | Models, colours and regions — see note below |
 | `src/lib/inventory/inventory.ts` | Stock reservation with row-level locking |
 | `src/lib/inventory/inventory.db.test.ts` | Locking, retry and oversell tests, real Postgres |
@@ -95,6 +96,15 @@ cp .env.example .env                  # then fill in the secrets below
 pnpm prisma migrate dev --name init
 pnpm prisma db seed                   # dealers, pincodes, price book, inventory
 pnpm dev
+```
+
+The dealer step measures distance from the pincode's centre, which comes from
+the `pincode_geo` table. The seed puts placeholder coordinates on its own
+pincodes. For real ones, load India Post's All India Pincode Directory
+(data.gov.in, CSV):
+
+```bash
+pnpm db:import-pincodes path/to/pincodes.csv
 ```
 
 Two secrets to generate before anything runs:

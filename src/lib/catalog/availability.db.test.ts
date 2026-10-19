@@ -11,6 +11,7 @@ const prisma = new PrismaClient({
 
 const MODEL = 'nexus-ex-plus';
 const REGION = 'south';
+const DEALER = 'AMP-CAT-1';
 
 const d = (n: number) => new Prisma.Decimal(n);
 
@@ -30,7 +31,7 @@ async function stocked(modelCode: string, units: number, updatedAt = new Date())
   await prisma.inventory.create({
     data: {
       modelCode,
-      regionCode: REGION,
+      dealerCode: DEALER,
       unitsTotal: units,
       unitsReserved: 0,
       updatedAt,
@@ -47,6 +48,11 @@ function find(catalog: Awaited<ReturnType<typeof buildCatalog>>, code: string) {
 
 beforeEach(async () => {
   await resetDatabase(prisma);
+  // Stock is keyed on a dealer by foreign key, so one must exist before any
+  // inventory row can be written.
+  await prisma.dealer.create({
+    data: { dealerCode: DEALER, name: 'Catalog Motors', active: true },
+  });
 });
 
 afterAll(async () => {
@@ -77,7 +83,7 @@ describe('with a region', () => {
     await priced(MODEL, 109900, 10990);
     await stocked(MODEL, 15);
 
-    const entry = find(await buildCatalog(prisma, REGION), MODEL);
+    const entry = find(await buildCatalog(prisma, REGION, [DEALER]), MODEL);
 
     expect(entry.price?.exShowroom.amount).toBe(109900);
     expect(entry.price?.rtoCharges.amount).toBe(10990);
@@ -90,10 +96,10 @@ describe('with a region', () => {
   it('subtracts units held by in-flight payments', async () => {
     await priced(MODEL);
     await prisma.inventory.create({
-      data: { modelCode: MODEL, regionCode: REGION, unitsTotal: 5, unitsReserved: 3 },
+      data: { modelCode: MODEL, dealerCode: DEALER, unitsTotal: 5, unitsReserved: 3 },
     });
 
-    const entry = find(await buildCatalog(prisma, REGION), MODEL);
+    const entry = find(await buildCatalog(prisma, REGION, [DEALER]), MODEL);
     expect(entry.available).toBe(2);
     expect(entry.purchasable).toBe(true);
   });
@@ -107,7 +113,7 @@ describe('what blocks a sale', () => {
     await priced(MODEL);
     await stocked(MODEL, 0);
 
-    const entry = find(await buildCatalog(prisma, REGION), MODEL);
+    const entry = find(await buildCatalog(prisma, REGION, [DEALER]), MODEL);
     expect(entry.inStock).toBe(false);
     expect(entry.purchasable).toBe(false);
     // The price is still shown — the customer should know what it would cost.
@@ -117,10 +123,10 @@ describe('what blocks a sale', () => {
   it('every unit already reserved', async () => {
     await priced(MODEL);
     await prisma.inventory.create({
-      data: { modelCode: MODEL, regionCode: REGION, unitsTotal: 2, unitsReserved: 2 },
+      data: { modelCode: MODEL, dealerCode: DEALER, unitsTotal: 2, unitsReserved: 2 },
     });
 
-    const entry = find(await buildCatalog(prisma, REGION), MODEL);
+    const entry = find(await buildCatalog(prisma, REGION, [DEALER]), MODEL);
     expect(entry.available).toBe(0);
     expect(entry.purchasable).toBe(false);
   });
@@ -128,7 +134,7 @@ describe('what blocks a sale', () => {
   it('no inventory row at all', async () => {
     await priced(MODEL);
 
-    const entry = find(await buildCatalog(prisma, REGION), MODEL);
+    const entry = find(await buildCatalog(prisma, REGION, [DEALER]), MODEL);
     expect(entry.available).toBe(0);
     expect(entry.purchasable).toBe(false);
   });
@@ -137,7 +143,7 @@ describe('what blocks a sale', () => {
     // Plenty in the warehouse and nothing to charge for it.
     await stocked(MODEL, 15);
 
-    const entry = find(await buildCatalog(prisma, REGION), MODEL);
+    const entry = find(await buildCatalog(prisma, REGION, [DEALER]), MODEL);
     expect(entry.inStock).toBe(true);
     expect(entry.price).toBeNull();
     expect(entry.purchasable).toBe(false);
@@ -149,7 +155,7 @@ describe('stale stock', () => {
     await priced(MODEL);
     await stocked(MODEL, 15, new Date(Date.now() - (STALE_AFTER_DAYS + 1) * 86_400_000));
 
-    const entry = find(await buildCatalog(prisma, REGION), MODEL);
+    const entry = find(await buildCatalog(prisma, REGION, [DEALER]), MODEL);
     expect(entry.stale).toBe(true);
     // Still sellable — stale is a prompt for ops, not a block on the customer.
     expect(entry.purchasable).toBe(true);
@@ -159,7 +165,7 @@ describe('stale stock', () => {
     await priced(MODEL);
     await stocked(MODEL, 15);
 
-    expect(find(await buildCatalog(prisma, REGION), MODEL).stale).toBe(false);
+    expect(find(await buildCatalog(prisma, REGION, [DEALER]), MODEL).stale).toBe(false);
   });
 });
 
@@ -168,7 +174,7 @@ describe('the partial payment option', () => {
     await priced(MODEL);
     await stocked(MODEL, 15);
 
-    expect(find(await buildCatalog(prisma, REGION), MODEL).price?.partial).toBeNull();
+    expect(find(await buildCatalog(prisma, REGION, [DEALER]), MODEL).price?.partial).toBeNull();
   });
 
   it('appears once an amount is set', async () => {
@@ -185,7 +191,7 @@ describe('the partial payment option', () => {
     });
     await stocked(MODEL, 15);
 
-    const partial = find(await buildCatalog(prisma, REGION), MODEL).price?.partial;
+    const partial = find(await buildCatalog(prisma, REGION, [DEALER]), MODEL).price?.partial;
     expect(partial?.amount.amount).toBe(12000);
     expect(partial?.amount.display).toBe('₹12,000');
     expect(partial?.balance.amount).toBe(108000);

@@ -17,6 +17,7 @@ pnpm lint && pnpm typecheck
 docker compose up -d                  # local Postgres on :5432
 pnpm prisma migrate dev --name <name>
 pnpm prisma studio
+pnpm db:import-pincodes <csv>         # pincode coordinates for the dealer radius
 ```
 
 ## Stack

@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { getModel } from '@/lib/catalog/catalog';
-import { resolvePincode } from '@/lib/dealers/resolve';
+import { dealerForLead, resolvePincode } from '@/lib/dealers/resolve';
 import type { DealerNotifier } from '@/lib/notifications/dealer';
 import { describeSlot, validateSlot, type SlotRejection } from './slots';
 
@@ -84,17 +84,19 @@ export async function bookTestRide(
   const slot = validateSlot(input.slotDate, input.slotWindow, now);
   if (!slot.ok) return { ok: false, reason: 'bad_slot', detail: slot.reason };
 
+  // The dealer they picked at the dealer step, or the pincode's own.
   const location = await resolvePincode(prisma, lead.pincode);
-  if (!location.dealer) return { ok: false, reason: 'no_dealer' };
+  const dealer = await dealerForLead(prisma, lead, location.dealer);
+  if (!dealer) return { ok: false, reason: 'no_dealer' };
 
   // Never a dead end: an unserviced home request becomes a dealership visit
   // with the reason stated, rather than a refusal.
   let mode: TestRideMode = input.mode;
   let modeChangedReason: string | null = null;
-  if (mode === 'home' && !location.dealer.homeServiceable) {
+  if (mode === 'home' && !dealer.homeServiceable) {
     mode = 'dealer';
     modeChangedReason =
-      `${location.dealer.name} doesn't bring scooters to your area yet, ` +
+      `${dealer.name} doesn't bring scooters to your area yet, ` +
       'so we’ve booked your ride at the showroom instead.';
   }
 
@@ -119,7 +121,7 @@ export async function bookTestRide(
     (await prisma.testRide.create({
       data: {
         leadId: lead.id,
-        dealerCode: location.dealer.code,
+        dealerCode: dealer.code,
         modelCode: model.code,
         colourCode,
         mode,
@@ -137,7 +139,7 @@ export async function bookTestRide(
       intent: 'testride',
       modelCode: model.code,
       colourCode,
-      dealerCode: location.dealer.code,
+      dealerCode: dealer.code,
       status: 'test_ride_booked',
     },
   });
@@ -147,9 +149,9 @@ export async function bookTestRide(
   let dealerNotified = true;
   try {
     await notifier.testRideBooked({
-      dealerCode: location.dealer.code,
-      dealerName: location.dealer.name,
-      dealerPhone: location.dealer.phone,
+      dealerCode: dealer.code,
+      dealerName: dealer.name,
+      dealerPhone: dealer.phone,
       customerName: lead.name,
       customerPhoneLast4: lead.phoneLast4,
       customerPincode: lead.pincode,
@@ -164,7 +166,7 @@ export async function bookTestRide(
     // whole request here would lose a confirmed ride over a flaky webhook.
     dealerNotified = false;
     console.error('[test-rides] dealer notification failed', {
-      dealerCode: location.dealer.code,
+      dealerCode: dealer.code,
       bookingId: booking.id,
       message: error instanceof Error ? error.message : String(error),
     });
@@ -180,10 +182,10 @@ export async function bookTestRide(
       slotDate: input.slotDate,
       slotWindow: slot.window.code,
       dealer: {
-        code: location.dealer.code,
-        name: location.dealer.name,
-        phone: location.dealer.phone,
-        address: location.dealer.address,
+        code: dealer.code,
+        name: dealer.name,
+        phone: dealer.phone,
+        address: dealer.address,
       },
       modelCode: model.code,
       modelName: model.name,

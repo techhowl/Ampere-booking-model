@@ -26,5 +26,6 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
 
   await prisma.lead.deleteMany({});
   await prisma.pincodeMap.deleteMany({});
+  await prisma.pincodeGeo.deleteMany({});
   await prisma.dealer.deleteMany({});
 }

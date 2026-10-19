@@ -7,6 +7,8 @@ import { MODELS, REGIONS } from '../src/lib/catalog/catalog';
  *
  * Everything here stands in for data we do not have yet:
  *   - dealers and pincode mapping - open item #4 (Dealer ops)
+ *   - pincode coordinates         - load the real ones with
+ *                                   `pnpm db:import-pincodes <csv>`
  *   - region definitions          - open item #2 (Sales)
  *   - prices                      - open item #5 (Finance)
  *
@@ -25,7 +27,12 @@ const SEED_EFFECTIVE_FROM = new Date('2026-01-01T00:00:00.000Z');
 const SEEDED_BY = 'seed';
 
 /** Spec 8: "a number in each cell", default 15. */
-const UNITS_PER_MODEL_PER_REGION = 15;
+/**
+ * Starting stock per model, per dealer, per month. Ampere maintains the real
+ * numbers by hand — see `pnpm inventory:export` / `inventory:import`. This is
+ * only what a freshly seeded database begins with.
+ */
+const UNITS_PER_MODEL_PER_DEALER = 15;
 
 /* ------------------------------------------------------------------ */
 /* Dealers - PLACEHOLDER                                               */
@@ -90,6 +97,36 @@ const DEALERS: SeedDealer[] = [
     lng: 77.6408,
     homeServiceable: true,
   },
+  // Three more around Bengaluru, so the dealer step has three within 15 km
+  // to show. Mumbai (400001) is left with one dealer 22 km away, so the
+  // "nothing in range" state is reachable too.
+  {
+    dealerCode: 'AMP-S-003',
+    name: 'Ampere Koramangala',
+    phone: '+918040000009',
+    address: '80 Feet Road, Koramangala, Bengaluru 560034',
+    lat: 12.9352,
+    lng: 77.6245,
+    homeServiceable: true,
+  },
+  {
+    dealerCode: 'AMP-S-004',
+    name: 'Ampere Jayanagar',
+    phone: '+918040000010',
+    address: '11th Main, Jayanagar 4th Block, Bengaluru 560011',
+    lat: 12.9299,
+    lng: 77.5826,
+    homeServiceable: false,
+  },
+  {
+    dealerCode: 'AMP-S-005',
+    name: 'Ampere Whitefield',
+    phone: '+918040000011',
+    address: 'ITPL Main Road, Whitefield, Bengaluru 560066',
+    lat: 12.9698,
+    lng: 77.75,
+    homeServiceable: true,
+  },
   {
     dealerCode: 'AMP-S-002',
     name: 'Ampere Chennai Anna Salai',
@@ -129,29 +166,35 @@ interface SeedPincode {
   stateCode: string;
   regionCode: string;
   dealerCode: string;
+  /** Approximate centre, for the dealer radius. Goes to pincode_geo. */
+  lat: number;
+  lng: number;
 }
 
 const PINCODES: SeedPincode[] = [
   // North
-  { pincode: '110001', stateCode: 'DL', regionCode: 'north', dealerCode: 'AMP-N-001' },
-  { pincode: '122001', stateCode: 'HR', regionCode: 'north', dealerCode: 'AMP-N-001' },
-  { pincode: '201301', stateCode: 'UP', regionCode: 'north', dealerCode: 'AMP-N-001' },
-  { pincode: '302001', stateCode: 'RJ', regionCode: 'north', dealerCode: 'AMP-N-002' },
+  { pincode: '110001', stateCode: 'DL', regionCode: 'north', dealerCode: 'AMP-N-001', lat: 28.6328, lng: 77.2197 },
+  { pincode: '122001', stateCode: 'HR', regionCode: 'north', dealerCode: 'AMP-N-001', lat: 28.4595, lng: 77.0266 },
+  { pincode: '201301', stateCode: 'UP', regionCode: 'north', dealerCode: 'AMP-N-001', lat: 28.5706, lng: 77.3261 },
+  { pincode: '302001', stateCode: 'RJ', regionCode: 'north', dealerCode: 'AMP-N-002', lat: 26.9196, lng: 75.788 },
   // West
-  { pincode: '400001', stateCode: 'MH', regionCode: 'west', dealerCode: 'AMP-W-001' },
-  { pincode: '411001', stateCode: 'MH', regionCode: 'west', dealerCode: 'AMP-W-001' },
-  { pincode: '380001', stateCode: 'GJ', regionCode: 'west', dealerCode: 'AMP-W-002' },
-  { pincode: '452001', stateCode: 'MP', regionCode: 'west', dealerCode: 'AMP-W-002' },
+  { pincode: '400001', stateCode: 'MH', regionCode: 'west', dealerCode: 'AMP-W-001', lat: 18.9388, lng: 72.8354 },
+  { pincode: '411001', stateCode: 'MH', regionCode: 'west', dealerCode: 'AMP-W-001', lat: 18.5204, lng: 73.8567 },
+  { pincode: '380001', stateCode: 'GJ', regionCode: 'west', dealerCode: 'AMP-W-002', lat: 23.0225, lng: 72.5714 },
+  { pincode: '452001', stateCode: 'MP', regionCode: 'west', dealerCode: 'AMP-W-002', lat: 22.7196, lng: 75.8577 },
   // South
-  { pincode: '560001', stateCode: 'KA', regionCode: 'south', dealerCode: 'AMP-S-001' },
-  { pincode: '560038', stateCode: 'KA', regionCode: 'south', dealerCode: 'AMP-S-001' },
-  { pincode: '600001', stateCode: 'TN', regionCode: 'south', dealerCode: 'AMP-S-002' },
-  { pincode: '682001', stateCode: 'KL', regionCode: 'south', dealerCode: 'AMP-S-002' },
+  { pincode: '560001', stateCode: 'KA', regionCode: 'south', dealerCode: 'AMP-S-001', lat: 12.9756, lng: 77.605 },
+  { pincode: '560038', stateCode: 'KA', regionCode: 'south', dealerCode: 'AMP-S-001', lat: 12.9784, lng: 77.6408 },
+  { pincode: '560034', stateCode: 'KA', regionCode: 'south', dealerCode: 'AMP-S-003', lat: 12.9352, lng: 77.6245 },
+  { pincode: '560011', stateCode: 'KA', regionCode: 'south', dealerCode: 'AMP-S-004', lat: 12.9299, lng: 77.5826 },
+  { pincode: '560066', stateCode: 'KA', regionCode: 'south', dealerCode: 'AMP-S-005', lat: 12.9698, lng: 77.75 },
+  { pincode: '600001', stateCode: 'TN', regionCode: 'south', dealerCode: 'AMP-S-002', lat: 13.0878, lng: 80.2785 },
+  { pincode: '682001', stateCode: 'KL', regionCode: 'south', dealerCode: 'AMP-S-002', lat: 9.9658, lng: 76.2421 },
   // East
-  { pincode: '700001', stateCode: 'WB', regionCode: 'east', dealerCode: 'AMP-E-001' },
-  { pincode: '700091', stateCode: 'WB', regionCode: 'east', dealerCode: 'AMP-E-001' },
-  { pincode: '751001', stateCode: 'OD', regionCode: 'east', dealerCode: 'AMP-E-002' },
-  { pincode: '800001', stateCode: 'BR', regionCode: 'east', dealerCode: 'AMP-E-002' },
+  { pincode: '700001', stateCode: 'WB', regionCode: 'east', dealerCode: 'AMP-E-001', lat: 22.5726, lng: 88.3639 },
+  { pincode: '700091', stateCode: 'WB', regionCode: 'east', dealerCode: 'AMP-E-001', lat: 22.5868, lng: 88.4171 },
+  { pincode: '751001', stateCode: 'OD', regionCode: 'east', dealerCode: 'AMP-E-002', lat: 20.2961, lng: 85.8245 },
+  { pincode: '800001', stateCode: 'BR', regionCode: 'east', dealerCode: 'AMP-E-002', lat: 25.6093, lng: 85.1376 },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -210,11 +253,18 @@ async function seedDealers(): Promise<number> {
 }
 
 async function seedPincodes(): Promise<number> {
-  for (const p of PINCODES) {
+  for (const { lat, lng, ...p } of PINCODES) {
     await prisma.pincodeMap.upsert({
       where: { pincode: p.pincode },
       create: p,
       update: p,
+    });
+    // Left alone if already there: a real coordinate from the India Post
+    // import must not be overwritten by a placeholder on the next seed.
+    await prisma.pincodeGeo.upsert({
+      where: { pincode: p.pincode },
+      create: { pincode: p.pincode, lat, lng },
+      update: {},
     });
   }
   return PINCODES.length;
@@ -266,24 +316,32 @@ async function seedPriceBook(): Promise<number> {
 }
 
 async function seedInventory(): Promise<number> {
+  // Stock belongs to a dealer, so the grid is model x dealer. Only active
+  // dealers get rows: an inactive showroom holding stock would keep a model
+  // purchasable that nobody can actually hand over.
+  const dealers = await prisma.dealer.findMany({
+    where: { active: true },
+    select: { dealerCode: true },
+  });
+
   let count = 0;
   for (const model of MODELS) {
-    for (const region of REGIONS) {
+    for (const dealer of dealers) {
       await prisma.inventory.upsert({
         where: {
-          modelCode_regionCode: { modelCode: model.code, regionCode: region.code },
+          modelCode_dealerCode: { modelCode: model.code, dealerCode: dealer.dealerCode },
         },
         create: {
           modelCode: model.code,
-          regionCode: region.code,
-          unitsTotal: UNITS_PER_MODEL_PER_REGION,
+          dealerCode: dealer.dealerCode,
+          unitsTotal: UNITS_PER_MODEL_PER_DEALER,
           unitsReserved: 0,
           updatedBy: SEEDED_BY,
         },
         // unitsReserved is deliberately left alone - re-running the seed must
         // not wipe a hold belonging to a checkout that is in flight.
         update: {
-          unitsTotal: UNITS_PER_MODEL_PER_REGION,
+          unitsTotal: UNITS_PER_MODEL_PER_DEALER,
           updatedAt: new Date(),
           updatedBy: SEEDED_BY,
         },
@@ -330,7 +388,7 @@ async function main(): Promise<void> {
 
   const inventory = await seedInventory();
   console.log(
-    `  inventory    ${inventory}  (${UNITS_PER_MODEL_PER_REGION} units per model per region)`,
+    `  inventory    ${inventory}  (${UNITS_PER_MODEL_PER_DEALER} units per model per dealer)`,
   );
 
   console.log('\nDone. Dealers, pincodes, regions and prices are all placeholders.');

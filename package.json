@@ -13,9 +13,12 @@
     "test:watch": "vitest",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
+    "db:import-pincodes": "tsx scripts/import-pincode-geo.ts",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
-    "juspay:smoke": "tsx scripts/juspay-smoke.ts"
+    "juspay:smoke": "tsx scripts/juspay-smoke.ts",
+    "inventory:export": "tsx scripts/inventory-csv.ts export",
+    "inventory:import": "tsx scripts/inventory-csv.ts import"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",

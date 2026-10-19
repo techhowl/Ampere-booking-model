@@ -1,13 +1,11 @@
-import { AmpereLogo } from './Brand';
+import { SUPPORT_PHONE } from '@/lib/contact';
+import { AmpereLogo, GreavesLogo } from './Brand';
 
 /**
  * Header and footer, following the Figma frames.
  *
  * Header: near-black, logo centred, nav split either side. Footer: the Greaves
  * Electric Mobility block with brand, range and contact columns.
- *
- * ASSET SLOT: `AmpereLogo` draws a stand-in wordmark. Replace its body with
- * Ampere's real mark and both pick it up.
  */
 
 const NAV_LEFT = [
@@ -37,9 +35,12 @@ export function SiteHeader() {
           ))}
         </nav>
 
-        <a href="https://ampere-electric.com/" className="text-white lg:flex-none">
+        <a
+          href="https://ampere-electric.com/"
+          aria-label="Ampere Electric home"
+          className="flex items-center lg:flex-none"
+        >
           <AmpereLogo />
-          <span className="sr-only">Ampere Electric home</span>
         </a>
 
         <nav className="hidden flex-1 items-center justify-end gap-7 lg:flex">
@@ -105,13 +106,9 @@ export function SiteFooter() {
   return (
     <footer className="bg-amp-ink text-white">
       <div className="mx-auto max-w-7xl px-5 py-12">
-        <p className="text-[20px] font-bold uppercase leading-[1.05] tracking-tight">
-          Greaves
-          <br />
-          Electric
-          <br />
-          Mobility
-        </p>
+        <a href="https://greaveselectricmobility.com/" className="inline-block">
+          <GreavesLogo />
+        </a>
 
         <div className="mt-10 grid gap-10 sm:grid-cols-3">
           {FOOTER_COLUMNS.map((column) => (
@@ -144,7 +141,7 @@ export function SiteFooter() {
             Write to us
           </a>
           <a
-            href="tel:+918069809980"
+            href={`tel:${SUPPORT_PHONE.tel}`}
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/20 px-5 text-[13px] font-semibold uppercase tracking-wide transition-colors hover:bg-white/10"
           >
             Speak to customer service

@@ -1,7 +1,12 @@
 import { Prisma, PrismaClient, ReservationStatus } from '@prisma/client';
 
 /**
- * Inventory: manual stock per model per region.
+ * Inventory: manual stock per model per DEALER.
+ *
+ * Keyed on the dealer rather than the region because that is the unit a
+ * customer collects from. A scooter sitting at a showroom in another city is
+ * not stock this customer can buy, and treating it as such is how a confirmed
+ * order becomes a phone call apologising.
  *
  * The only rule that matters: two customers must never both succeed in buying
  * the last unit. Everything here exists to make that impossible.
@@ -15,8 +20,8 @@ export const RESERVATION_MINUTES = 15;
 export const STALE_AFTER_DAYS = 15;
 
 export class OutOfStockError extends Error {
-  constructor(modelCode: string, regionCode: string) {
-    super(`No units available for ${modelCode} in ${regionCode}`);
+  constructor(modelCode: string, dealerCode: string) {
+    super(`No units available for ${modelCode} at ${dealerCode}`);
     this.name = 'OutOfStockError';
   }
 }
@@ -32,12 +37,12 @@ interface InventoryRow {
 async function lockRow(
   tx: Tx,
   modelCode: string,
-  regionCode: string,
+  dealerCode: string,
 ): Promise<InventoryRow | null> {
   const rows = await tx.$queryRaw<InventoryRow[]>`
     SELECT units_total, units_reserved, updated_at
     FROM inventory
-    WHERE model_code = ${modelCode} AND region_code = ${regionCode}
+    WHERE model_code = ${modelCode} AND dealer_code = ${dealerCode}
     FOR UPDATE
   `;
   return rows[0] ?? null;
@@ -47,10 +52,10 @@ async function lockRow(
 export async function getAvailable(
   prisma: PrismaClient,
   modelCode: string,
-  regionCode: string,
+  dealerCode: string,
 ): Promise<{ available: number; stale: boolean; updatedAt: Date | null }> {
   const row = await prisma.inventory.findUnique({
-    where: { modelCode_regionCode: { modelCode, regionCode } },
+    where: { modelCode_dealerCode: { modelCode, dealerCode } },
   });
   if (!row) return { available: 0, stale: false, updatedAt: null };
 
@@ -76,9 +81,9 @@ export async function getAvailable(
  */
 export async function reserve(
   prisma: PrismaClient,
-  params: { orderId: string; modelCode: string; regionCode: string },
+  params: { orderId: string; modelCode: string; dealerCode: string },
 ): Promise<{ reservationId: string; expiresAt: Date }> {
-  const { orderId, modelCode, regionCode } = params;
+  const { orderId, modelCode, dealerCode } = params;
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.inventoryReservation.findUnique({ where: { orderId } });
@@ -86,24 +91,24 @@ export async function reserve(
       return { reservationId: existing.id, expiresAt: existing.expiresAt };
     }
 
-    const row = await lockRow(tx, modelCode, regionCode);
-    if (!row) throw new OutOfStockError(modelCode, regionCode);
+    const row = await lockRow(tx, modelCode, dealerCode);
+    if (!row) throw new OutOfStockError(modelCode, dealerCode);
     if (row.units_total - row.units_reserved < 1) {
-      throw new OutOfStockError(modelCode, regionCode);
+      throw new OutOfStockError(modelCode, dealerCode);
     }
 
     await tx.$executeRaw`
       UPDATE inventory SET units_reserved = units_reserved + 1
-      WHERE model_code = ${modelCode} AND region_code = ${regionCode}
+      WHERE model_code = ${modelCode} AND dealer_code = ${dealerCode}
     `;
 
     const expiresAt = new Date(Date.now() + RESERVATION_MINUTES * 60_000);
     const reservation = await tx.inventoryReservation.upsert({
       where: { orderId },
-      create: { orderId, modelCode, regionCode, expiresAt, status: ReservationStatus.held },
+      create: { orderId, modelCode, dealerCode, expiresAt, status: ReservationStatus.held },
       // Reached when the previous hold was released or expired and the customer
       // is retrying. Re-arm the same row rather than inserting a duplicate.
-      update: { modelCode, regionCode, expiresAt, status: ReservationStatus.held },
+      update: { modelCode, dealerCode, expiresAt, status: ReservationStatus.held },
     });
 
     return { reservationId: reservation.id, expiresAt };
@@ -119,12 +124,12 @@ export async function convert(prisma: PrismaClient, orderId: string): Promise<vo
     const res = await tx.inventoryReservation.findUnique({ where: { orderId } });
     if (!res || res.status !== ReservationStatus.held) return; // already handled
 
-    await lockRow(tx, res.modelCode, res.regionCode);
+    await lockRow(tx, res.modelCode, res.dealerCode);
     await tx.$executeRaw`
       UPDATE inventory
       SET units_total = GREATEST(units_total - 1, 0),
           units_reserved = GREATEST(units_reserved - 1, 0)
-      WHERE model_code = ${res.modelCode} AND region_code = ${res.regionCode}
+      WHERE model_code = ${res.modelCode} AND dealer_code = ${res.dealerCode}
     `;
     await tx.inventoryReservation.update({
       where: { orderId },
@@ -139,10 +144,10 @@ export async function release(prisma: PrismaClient, orderId: string): Promise<vo
     const res = await tx.inventoryReservation.findUnique({ where: { orderId } });
     if (!res || res.status !== ReservationStatus.held) return;
 
-    await lockRow(tx, res.modelCode, res.regionCode);
+    await lockRow(tx, res.modelCode, res.dealerCode);
     await tx.$executeRaw`
       UPDATE inventory SET units_reserved = GREATEST(units_reserved - 1, 0)
-      WHERE model_code = ${res.modelCode} AND region_code = ${res.regionCode}
+      WHERE model_code = ${res.modelCode} AND dealer_code = ${res.dealerCode}
     `;
     await tx.inventoryReservation.update({
       where: { orderId },
@@ -168,25 +173,90 @@ export async function expireStale(prisma: PrismaClient): Promise<number> {
 /** Admin grid write. Always records who changed what. */
 export async function setUnits(
   prisma: PrismaClient,
-  params: { modelCode: string; regionCode: string; units: number; changedBy: string },
+  params: { modelCode: string; dealerCode: string; units: number; changedBy: string },
 ): Promise<void> {
-  const { modelCode, regionCode, units, changedBy } = params;
+  const { modelCode, dealerCode, units, changedBy } = params;
   if (!Number.isInteger(units) || units < 0) {
     throw new Error('units must be a non-negative integer');
   }
 
   await prisma.$transaction(async (tx) => {
-    const row = await lockRow(tx, modelCode, regionCode);
+    const row = await lockRow(tx, modelCode, dealerCode);
     const before = row?.units_total ?? 0;
 
     await tx.inventory.upsert({
-      where: { modelCode_regionCode: { modelCode, regionCode } },
-      create: { modelCode, regionCode, unitsTotal: units, updatedBy: changedBy },
+      where: { modelCode_dealerCode: { modelCode, dealerCode } },
+      create: { modelCode, dealerCode, unitsTotal: units, updatedBy: changedBy },
       update: { unitsTotal: units, updatedAt: new Date(), updatedBy: changedBy },
     });
 
     await tx.inventoryAudit.create({
-      data: { modelCode, regionCode, unitsBefore: before, unitsAfter: units, changedBy },
+      data: { modelCode, dealerCode, unitsBefore: before, unitsAfter: units, changedBy },
     });
   });
+}
+
+/**
+ * Stock for one model across several dealers, in the order given.
+ *
+ * One query rather than one per dealer, because the buy page asks this for
+ * every model on every pincode change.
+ */
+export async function availabilityAcross(
+  prisma: PrismaClient,
+  modelCode: string,
+  dealerCodes: string[],
+): Promise<{ byDealer: Map<string, number>; total: number; stale: boolean }> {
+  if (dealerCodes.length === 0) {
+    return { byDealer: new Map(), total: 0, stale: false };
+  }
+
+  const rows = await prisma.inventory.findMany({
+    where: { modelCode, dealerCode: { in: dealerCodes } },
+    select: { dealerCode: true, unitsTotal: true, unitsReserved: true, updatedAt: true },
+  });
+
+  const byDealer = new Map<string, number>();
+  let total = 0;
+  // Spec 8: stale inventory announces itself. The OLDEST row decides — one
+  // dealer who has not updated in a month makes the picture untrustworthy even
+  // if their neighbour updated this morning.
+  let oldest: Date | null = null;
+
+  for (const row of rows) {
+    const units = Math.max(0, row.unitsTotal - row.unitsReserved);
+    byDealer.set(row.dealerCode, units);
+    total += units;
+    if (!oldest || row.updatedAt < oldest) oldest = row.updatedAt;
+  }
+
+  // A dealer with no row has no stock, not unknown stock.
+  for (const code of dealerCodes) if (!byDealer.has(code)) byDealer.set(code, 0);
+
+  return {
+    byDealer,
+    total,
+    stale: oldest !== null && Date.now() - oldest.getTime() > STALE_AFTER_DAYS * 86_400_000,
+  };
+}
+
+/**
+ * The first dealer in this list with a unit of this model to sell.
+ *
+ * `dealerCodes` arrives nearest-first, so "first with stock" means "nearest
+ * with stock" — the customer's preferred showroom when it can serve them, the
+ * next one along when it cannot. Null when none of them can.
+ *
+ * Advisory only. It reads without locking, so between this answering and
+ * reserve() running, the unit can go. reserve() takes the row lock and is the
+ * one that decides; this exists so the page can show the right dealer and hide
+ * the buy button when nobody in range can fulfil.
+ */
+export async function firstDealerWithStock(
+  prisma: PrismaClient,
+  modelCode: string,
+  dealerCodes: string[],
+): Promise<string | null> {
+  const { byDealer } = await availabilityAcross(prisma, modelCode, dealerCodes);
+  return dealerCodes.find((code) => (byDealer.get(code) ?? 0) > 0) ?? null;
 }

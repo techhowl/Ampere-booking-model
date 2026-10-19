@@ -127,6 +127,24 @@ async function resolveByZone(
   };
 }
 
+/**
+ * The dealer a lead is going to.
+ *
+ * The lead's dealer_code is written with the pincode at save time and replaced
+ * when the customer picks one at the dealer step, so it always belongs to the
+ * lead's own pincode. Use it while that dealer is still trading; otherwise
+ * fall back to whoever covers the pincode today.
+ */
+export async function dealerForLead(
+  prisma: PrismaClient,
+  lead: { dealerCode: string | null },
+  fallback: ResolvedDealer | null,
+): Promise<ResolvedDealer | null> {
+  if (!lead.dealerCode) return fallback;
+  const chosen = await prisma.dealer.findUnique({ where: { dealerCode: lead.dealerCode } });
+  return chosen?.active ? toResolved(chosen) : fallback;
+}
+
 function toResolved(dealer: {
   dealerCode: string;
   name: string;

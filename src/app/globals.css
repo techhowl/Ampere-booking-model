@@ -57,10 +57,15 @@
   color-scheme: light;
 }
 
+/*
+ * `clip`, not `hidden`. Hidden on both html and body turns body into a scroll
+ * container that never scrolls, which silently switches off position: sticky
+ * for everything inside it — the product panel included.
+ */
 html,
 body {
   max-width: 100vw;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {
@@ -112,6 +117,39 @@ textarea {
 
 .amp-rise {
   animation: amp-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* A new colour or model in the showcase: cross-fade, no movement. */
+@keyframes amp-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.amp-fade {
+  animation: amp-fade 0.35s ease-out both;
+}
+
+/* The tick on a confirmation. */
+@keyframes amp-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  70% {
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.amp-pop {
+  animation: amp-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {

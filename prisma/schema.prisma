@@ -112,15 +112,23 @@ model OtpAttempt {
 
 /// Manual stock. Per model, per region. Updated from the admin grid.
 /// available = unitsTotal - unitsReserved
+/// Stock per model per DEALER, maintained by hand.
+///
+/// Keyed on the dealer, not the region, because that is the unit a customer
+/// actually collects from: a scooter at a showroom 40km away is not stock this
+/// customer can buy. It is also what makes the fallback meaningful — when the
+/// nearest dealer is out, we try the next one in range.
 model Inventory {
   modelCode     String   @map("model_code")
-  regionCode    String   @map("region_code")
+  dealerCode    String   @map("dealer_code")
   unitsTotal    Int      @default(15) @map("units_total")
   unitsReserved Int      @default(0) @map("units_reserved")
   updatedAt     DateTime @default(now()) @map("updated_at")
   updatedBy     String?  @map("updated_by")
 
-  @@id([modelCode, regionCode])
+  dealer Dealer @relation(fields: [dealerCode], references: [dealerCode])
+
+  @@id([modelCode, dealerCode])
   @@map("inventory")
 }
 
@@ -129,13 +137,13 @@ model Inventory {
 model InventoryAudit {
   id          BigInt   @id @default(autoincrement())
   modelCode   String   @map("model_code")
-  regionCode  String   @map("region_code")
+  dealerCode  String   @map("dealer_code")
   unitsBefore Int      @map("units_before")
   unitsAfter  Int      @map("units_after")
   changedBy   String   @map("changed_by")
   changedAt   DateTime @default(now()) @map("changed_at")
 
-  @@index([modelCode, regionCode, changedAt])
+  @@index([modelCode, dealerCode, changedAt])
   @@map("inventory_audit")
 }
 
@@ -145,7 +153,8 @@ model InventoryReservation {
   id         String            @id @default(uuid()) @db.Uuid
   orderId    String            @unique @map("order_id")
   modelCode  String            @map("model_code")
-  regionCode String            @map("region_code")
+  /// Which dealer's stock is held. The order is fulfilled by this dealer.
+  dealerCode String            @map("dealer_code")
   status     ReservationStatus @default(held)
   expiresAt  DateTime          @map("expires_at")
   createdAt  DateTime          @default(now()) @map("created_at")
@@ -238,6 +247,7 @@ model Dealer {
   orders     Order[]
   testRides  TestRide[]
   pincodeMap PincodeMap[]
+  inventory  Inventory[]
 
   @@map("dealers")
 }
@@ -252,6 +262,21 @@ model PincodeMap {
 
   @@index([regionCode])
   @@map("pincode_map")
+}
+
+/// The centre of a pincode, for "dealers within 15 km".
+///
+/// Kept apart from pincode_map on purpose. That table is Ampere's own mapping
+/// of the pincodes it knows to a region and dealer; this is reference data for
+/// every pincode in India, bulk-loaded from the India Post directory by
+/// scripts/import-pincode-geo.ts. A pincode missing here still resolves — the
+/// dealer step falls back to the region's dealers, without distances.
+model PincodeGeo {
+  pincode String @id @db.Char(6)
+  lat     Float
+  lng     Float
+
+  @@map("pincode_geo")
 }
 
 /// partialMode + partialValue null => the partial payment option does not render.

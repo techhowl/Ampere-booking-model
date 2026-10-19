@@ -2,28 +2,29 @@
 
 import { useEffect, useState } from 'react';
 import type { ModelAvailability } from '@/lib/catalog/availability';
-import type { LeadCreatedResponse } from '@/lib/schemas/lead';
+import type { NearbyDealer } from '@/lib/schemas/dealer';
 import { HELP_TOPICS, HELP_TOPIC_LABELS } from '@/lib/schemas/test-ride';
 import type { OfferedDay } from '@/lib/test-rides/slots';
-import { Checkbox, Pill, PrimaryButton, Section } from '@/components/ui';
-import { ArrowLeftIcon } from '@/components/Brand';
+import { ChoiceCard, FOCUS, Notice, Pill, PrimaryButton, SelectionDot, Skeleton } from '@/components/ui';
+import { CheckIcon, HomeIcon, PhoneIcon, StoreIcon } from '@/components/Brand';
+import { StepActions, StepHeader } from './StepFrame';
 
 /**
- * The test ride branch: mode, date, slot, help topics.
+ * Step five, test ride: where, which day, which slot, and anything we can help
+ * with on the day.
  *
  * Slots come from the server, computed in IST. Nothing here reads the browser
  * clock — a laptop set to the wrong timezone would otherwise be offered
  * yesterday.
  *
- * Journey document section 03: picking Financing as a help topic opens the EMI
- * widget. That intent signal is collected on the current form and acted on by
- * nobody; here it does something.
+ * Journey document section 03: picking Financing as a help topic does
+ * something rather than filing the signal away.
  */
 
 interface Props {
-  lead: LeadCreatedResponse;
   model: ModelAvailability;
   colourCode: string | null;
+  dealer: NearbyDealer | null;
   onBooked: (booking: Booking) => void;
   onBack: () => void;
 }
@@ -38,7 +39,7 @@ export interface Booking {
   dealerNotified: boolean;
 }
 
-export function TestRideStep({ lead, model, colourCode, onBooked, onBack }: Props) {
+export function TestRideStep({ model, colourCode, dealer, onBooked, onBack }: Props) {
   const [days, setDays] = useState<OfferedDay[] | null>(null);
   const [mode, setMode] = useState<'home' | 'dealer'>('dealer');
   const [date, setDate] = useState<string | null>(null);
@@ -46,6 +47,10 @@ export function TestRideStep({ lead, model, colourCode, onBooked, onBack }: Prop
   const [topics, setTopics] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The chosen dealer says whether they ride to people's homes. The server
+  // still falls back to the showroom, and says so, if that changes.
+  const homeOffered = dealer?.homeServiceable ?? false;
 
   useEffect(() => {
     let cancelled = false;
@@ -71,9 +76,9 @@ export function TestRideStep({ lead, model, colourCode, onBooked, onBack }: Prop
   const selectedDay = days?.find((d) => d.date === date) ?? null;
   const wantsFinancing = topics.includes('financing');
 
-  function toggleTopic(topic: string, on: boolean) {
+  function toggleTopic(topic: string) {
     setTopics((current) =>
-      on ? [...new Set([...current, topic])] : current.filter((t) => t !== topic),
+      current.includes(topic) ? current.filter((t) => t !== topic) : [...current, topic],
     );
   }
 
@@ -112,50 +117,62 @@ export function TestRideStep({ lead, model, colourCode, onBooked, onBack }: Prop
     }
   }
 
-  if (error && !days) {
+  const header = (
+    <StepHeader
+      title="Book Your Test Ride"
+      text="Pick a time that suits you. It’s free, with no obligation to buy."
+    />
+  );
+
+  if (!days) {
     return (
-      <p role="alert" className="rounded-2xl bg-red-50 px-4 py-3 text-[14px] text-red-700">
-        {error}
-      </p>
+      <div className="flex flex-col gap-7">
+        {header}
+        {error ? (
+          <Notice tone="error">{error}</Notice>
+        ) : (
+          <div className="flex flex-col gap-3" aria-busy aria-label="Loading times">
+            <Skeleton className="h-20 w-full rounded-2xl" />
+            <Skeleton className="h-16 w-full rounded-2xl" />
+            <Skeleton className="h-24 w-full rounded-2xl" />
+          </div>
+        )}
+        <StepActions onBack={onBack}>
+          <PrimaryButton disabled>Book Test Ride</PrimaryButton>
+        </StepActions>
+      </div>
     );
   }
 
-  if (!days) {
-    return <p className="py-6 text-center text-[14px] text-amp-muted">Loading times…</p>;
-  }
-
   return (
-    <form onSubmit={submit} noValidate className="flex flex-col gap-6">
-      <button
-        type="button"
-        onClick={onBack}
-        className="flex cursor-pointer items-center gap-1.5 self-start rounded-lg py-1 pr-2 text-[13px] font-medium text-amp-muted transition-colors hover:text-amp-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amp-accent"
-      >
-        <ArrowLeftIcon className="size-4" />
-        Back
-      </button>
+    <form onSubmit={submit} noValidate className="flex flex-col gap-7">
+      {header}
 
-      <Section label="Mode of test ride">
+      <Group label="Where">
         <div className="grid grid-cols-2 gap-3">
-          <Pill selected={mode === 'home'} onClick={() => setMode('home')} className="uppercase">
-            Home
-          </Pill>
-          <Pill selected={mode === 'dealer'} onClick={() => setMode('dealer')} className="uppercase">
-            Dealer
-          </Pill>
+          <ModeCard
+            icon={<StoreIcon className="size-5" />}
+            title="At the showroom"
+            detail={dealer?.name ?? 'Your dealer'}
+            selected={mode === 'dealer'}
+            onSelect={() => setMode('dealer')}
+          />
+          <ModeCard
+            icon={<HomeIcon className="size-5" />}
+            title="At home"
+            detail={homeOffered ? 'We bring it to you' : 'Not offered by this dealer yet'}
+            selected={mode === 'home'}
+            disabled={!homeOffered}
+            onSelect={() => setMode('home')}
+          />
         </div>
-        {mode === 'home' && !lead.dealer?.homeServiceable && (
-          <p className="text-[13px] leading-relaxed text-amp-muted">
-            Home rides may not be available in your area. If not, we&apos;ll book you at the
-            showroom and tell you.
-          </p>
-        )}
-      </Section>
+      </Group>
 
-      <Section label="Date picker">
-        <div className="amp-scroll -mx-5 flex gap-2.5 overflow-x-auto px-5 pb-1">
+      <Group label="Day">
+        <div className="amp-scroll -mx-4 flex gap-2.5 overflow-x-auto px-4 pb-1 sm:-mx-8 sm:px-8">
           {days.map((day) => {
             const isSelected = day.date === date;
+            const [weekday, ...rest] = day.label.split(' ');
             return (
               <button
                 key={day.date}
@@ -167,39 +184,42 @@ export function TestRideStep({ lead, model, colourCode, onBooked, onBack }: Prop
                 }}
                 aria-pressed={isSelected}
                 className={[
-                  'flex min-w-22 shrink-0 flex-col items-center gap-0.5 rounded-xl border px-4 py-3 transition-all duration-200',
-                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amp-accent',
+                  'flex min-w-20 shrink-0 flex-col items-center gap-0.5 rounded-xl border px-3.5 py-2.5 transition-all duration-200',
+                  FOCUS,
                   isSelected
-                    ? 'border-amp-accent-fill bg-amp-accent-fill text-white'
+                    ? 'border-amp-accent-fill bg-amp-accent-fill text-white shadow-[0_8px_20px_-12px_rgba(47,110,212,0.8)]'
                     : day.hasAvailability
                       ? 'border-amp-line bg-white text-amp-ink hover:border-amp-ink'
-                      : 'border-transparent bg-amp-disabled text-white',
+                      : 'border-transparent bg-amp-page text-amp-muted/60',
                   day.hasAvailability ? 'cursor-pointer active:scale-[0.98]' : 'cursor-not-allowed',
                 ].join(' ')}
               >
-                <span className="text-[12px] opacity-80">{day.label.split(' ')[0]}</span>
+                <span className="text-[12px] opacity-80">{weekday}</span>
                 <span className="text-[15px] font-bold">
-                  {day.date.slice(8)}{' '}
-                  {new Date(`${day.date}T00:00:00Z`).toLocaleString('en-GB', {
-                    month: 'short',
-                    timeZone: 'UTC',
-                  })}
+                  {rest.length > 0
+                    ? rest.join(' ')
+                    : new Date(`${day.date}T00:00:00Z`).toLocaleString('en-GB', {
+                        day: 'numeric',
+                        month: 'short',
+                        timeZone: 'UTC',
+                      })}
                 </span>
               </button>
             );
           })}
         </div>
-      </Section>
+      </Group>
 
       {selectedDay && (
-        <Section label="Time slot">
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        <Group label="Time">
+          <div className="grid grid-cols-2 gap-2.5">
             {selectedDay.windows.map((window) => (
               <Pill
                 key={window.code}
                 selected={window.code === slot}
                 disabled={!window.available}
                 onClick={() => setSlot(window.code)}
+                className="rounded-xl"
               >
                 {window.label.replace(/–/g, '-')}
               </Pill>
@@ -208,96 +228,199 @@ export function TestRideStep({ lead, model, colourCode, onBooked, onBack }: Prop
           {!selectedDay.hasAvailability && (
             <p className="text-[13px] text-amp-muted">No times left today — pick another day.</p>
           )}
-        </Section>
+        </Group>
       )}
 
-      <Section label="Is there anything we can help you with?">
-        <div className="flex flex-wrap gap-x-6 gap-y-2.5">
-          {HELP_TOPICS.map((topic) => (
-            <Checkbox
-              key={topic}
-              checked={topics.includes(topic)}
-              onChange={(on) => toggleTopic(topic, on)}
-            >
-              {HELP_TOPIC_LABELS[topic]}
-            </Checkbox>
-          ))}
+      <Group label="Anything we can help you with?" hint="Optional">
+        <div className="flex flex-wrap gap-2">
+          {HELP_TOPICS.map((topic) => {
+            const on = topics.includes(topic);
+            return (
+              <button
+                key={topic}
+                type="button"
+                aria-pressed={on}
+                onClick={() => toggleTopic(topic)}
+                className={[
+                  'inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-full border px-4 text-[13px] transition-all duration-200',
+                  FOCUS,
+                  on
+                    ? 'border-amp-ink bg-amp-ink font-semibold text-white'
+                    : 'border-amp-line bg-white text-amp-ink hover:border-amp-ink',
+                ].join(' ')}
+              >
+                {on && <CheckIcon className="size-3.5" />}
+                {HELP_TOPIC_LABELS[topic]}
+              </button>
+            );
+          })}
         </div>
-      </Section>
+      </Group>
 
       {/*
         Picking Financing does something, rather than filing the signal away —
-        but what it does is set an expectation, not quote a rate. We do not
-        know this customer's lender, and the dealer will.
+        but what it does is set an expectation, not quote a rate.
       */}
       {wantsFinancing && (
-        <div className="amp-rise rounded-2xl border border-amp-accent/30 bg-amp-accent-tint px-4 py-3">
-          <p className="text-[13px] leading-relaxed text-amp-ink">
-            We&apos;ll have someone go through the finance options with you on the day — EMI plans,
-            tenures and what you&apos;d need to bring.
-          </p>
-        </div>
+        <Notice className="amp-rise">
+          We&apos;ll have someone go through the finance options with you on the day — plans,
+          tenures and what you&apos;d need to bring.
+        </Notice>
       )}
 
-      {error && (
-        <p role="alert" className="rounded-2xl bg-red-50 px-4 py-3 text-[14px] text-red-700">
-          {error}
-        </p>
-      )}
+      {error && <Notice tone="error">{error}</Notice>}
 
-      <PrimaryButton type="submit" disabled={submitting || !date || !slot}>
-        {submitting ? 'Booking…' : 'Book a test ride'}
-      </PrimaryButton>
-
-      <p className="text-center text-[12px] leading-relaxed text-amp-muted">
-        Free, and no obligation to buy.
-      </p>
+      <div className="flex flex-col gap-3">
+        <StepActions onBack={onBack}>
+          <PrimaryButton type="submit" loading={submitting} disabled={!date || !slot}>
+            Book Test Ride
+          </PrimaryButton>
+        </StepActions>
+        {!slot && (
+          <p className="text-center text-[12px] text-amp-muted">Pick a time to continue.</p>
+        )}
+      </div>
     </form>
+  );
+}
+
+function Group({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <fieldset className="flex min-w-0 flex-col gap-3">
+      <legend className="mb-3 w-full">
+        <span className="flex items-baseline justify-between text-[13px] font-medium text-amp-ink">
+          {label}
+          {hint && <span className="text-[12px] font-normal text-amp-muted">{hint}</span>}
+        </span>
+      </legend>
+      {children}
+    </fieldset>
+  );
+}
+
+function ModeCard({
+  icon,
+  title,
+  detail,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  detail: string;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <ChoiceCard selected={selected} disabled={disabled} onClick={onSelect}>
+      <span className="flex flex-col gap-3 p-4">
+        <span className="flex items-start justify-between">
+          <span
+            aria-hidden
+            className={[
+              'flex size-9 items-center justify-center rounded-xl',
+              selected ? 'bg-amp-accent-fill text-white' : 'bg-amp-page text-amp-ink',
+            ].join(' ')}
+          >
+            {icon}
+          </span>
+          <SelectionDot selected={selected} />
+        </span>
+        <span>
+          <span className="block text-[14px] font-semibold text-amp-ink">{title}</span>
+          <span className="mt-0.5 block text-[12px] leading-snug text-amp-muted">{detail}</span>
+        </span>
+      </span>
+    </ChoiceCard>
   );
 }
 
 /* ------------------------------------------------------------------ */
 
-export function TestRideConfirmation({ booking }: { booking: Booking }) {
+export function TestRideConfirmation({
+  booking,
+  canBuy,
+  onBuy,
+  onDone,
+}: {
+  booking: Booking;
+  canBuy: boolean;
+  onBuy: () => void;
+  onDone: () => void;
+}) {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-2xl border border-amp-accent/30 bg-amp-accent-tint p-4">
-        <p className="text-[16px] font-bold text-amp-ink">Your test ride is booked</p>
-        <p className="mt-1 text-[14px] leading-relaxed text-amp-ink/80">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col items-center gap-3 pt-2 text-center">
+        <span className="amp-pop flex size-14 items-center justify-center rounded-full bg-amp-offer text-amp-offer-ink">
+          <CheckIcon className="size-7" />
+        </span>
+        <h2
+          tabIndex={-1}
+          data-step-heading
+          className="text-[24px] font-bold leading-tight tracking-tight text-amp-ink outline-none sm:text-[28px]"
+        >
+          Your Test Ride Is Booked
+        </h2>
+        <p className="max-w-[40ch] text-[15px] leading-relaxed text-amp-muted">
           {booking.modelName}, {booking.slot},{' '}
           {booking.mode === 'home' ? 'at your home' : `at ${booking.dealer.name}`}.
         </p>
       </div>
 
       {/* Never silently move someone's test ride. */}
-      {booking.modeChangedReason && (
-        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[13px] leading-relaxed text-amber-900">
-          {booking.modeChangedReason}
-        </p>
-      )}
+      {booking.modeChangedReason && <Notice tone="warn">{booking.modeChangedReason}</Notice>}
 
-      <div className="rounded-2xl border border-amp-line bg-amp-card p-4">
-        <p className="text-[13px] font-semibold text-amp-ink">{booking.dealer.name}</p>
-        {booking.dealer.address && (
-          <p className="mt-0.5 text-[13px] leading-relaxed text-amp-muted">
-            {booking.dealer.address}
-          </p>
-        )}
-        {booking.dealer.phone && (
-          <a
-            href={`tel:${booking.dealer.phone}`}
-            className="mt-2 inline-block text-[13px] font-semibold text-amp-accent underline-offset-4 hover:underline"
-          >
-            {booking.dealer.phone}
-          </a>
-        )}
+      <div className="flex items-start gap-3.5 rounded-2xl border border-amp-line bg-white p-4">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amp-page text-amp-ink">
+          <StoreIcon className="size-5" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold text-amp-ink">{booking.dealer.name}</p>
+          {booking.dealer.address && (
+            <p className="mt-0.5 text-[13px] leading-relaxed text-amp-muted">
+              {booking.dealer.address}
+            </p>
+          )}
+          {booking.dealer.phone && (
+            <a
+              href={`tel:${booking.dealer.phone}`}
+              className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline"
+            >
+              <PhoneIcon className="size-3.5" />
+              Call the dealer
+            </a>
+          )}
+        </div>
       </div>
 
-      <p className="text-[13px] leading-relaxed text-amp-muted">
+      <p className="text-center text-[13px] leading-relaxed text-amp-muted">
         {booking.dealerNotified
           ? 'The dealer has been notified and will confirm with you shortly.'
           : 'We are still passing this to the dealer. Your booking is confirmed either way.'}
       </p>
+
+      {/* Spec 4: the cross-sell re-opens the other branch. A completed test
+          ride is not the end of the journey. */}
+      <div className="flex flex-col gap-3">
+        {canBuy && <PrimaryButton onClick={onBuy}>Buy your {booking.modelName} now</PrimaryButton>}
+        <button
+          type="button"
+          onClick={onDone}
+          className={`min-h-11 cursor-pointer rounded-xl text-[14px] font-medium text-amp-muted transition-colors hover:text-amp-ink ${FOCUS}`}
+        >
+          Back to the scooters
+        </button>
+      </div>
     </div>
   );
 }

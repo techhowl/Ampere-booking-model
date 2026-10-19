@@ -145,7 +145,7 @@ describe('inventory', () => {
     await prisma.inventory.create({
       data: {
         modelCode: 'nexus-ex-plus',
-        regionCode: 'south',
+        dealerCode: 'AMP-S-001',
         unitsTotal: 15,
         unitsReserved: 0,
       },
@@ -155,7 +155,7 @@ describe('inventory', () => {
 
     const stock = await prisma.inventory.findUniqueOrThrow({
       where: {
-        modelCode_regionCode: { modelCode: 'nexus-ex-plus', regionCode: 'south' },
+        modelCode_dealerCode: { modelCode: 'nexus-ex-plus', dealerCode: 'AMP-S-001' },
       },
     });
     expect(stock.unitsTotal).toBe(15);

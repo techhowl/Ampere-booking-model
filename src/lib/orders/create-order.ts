@@ -1,8 +1,9 @@
 import { Prisma, type PaymentType, type PrismaClient } from '@prisma/client';
 import { resolvePrice } from '@/lib/pricing/price';
-import { resolvePincode } from '@/lib/dealers/resolve';
+import { dealerForLead, resolvePincode } from '@/lib/dealers/resolve';
 import { getModel } from '@/lib/catalog/catalog';
-import { OutOfStockError, reserve } from '@/lib/inventory/inventory';
+import { OutOfStockError, firstDealerWithStock, reserve } from '@/lib/inventory/inventory';
+import { findNearbyDealers } from '@/lib/dealers/nearby';
 import type { JuspayClient } from '@/lib/juspay/juspay';
 import { decryptPhone } from '@/lib/crypto/phone';
 
@@ -55,6 +56,13 @@ export interface CreatedOrder {
   amountCharged: string;
   paymentType: PaymentType;
   reservationExpiresAt: string;
+  /** The dealer fulfilling this order. */
+  dealer: { code: string; name: string; phone: string | null } | null;
+  /**
+   * Set when the customer's chosen showroom was out of this model and we moved
+   * the order to another one in range. Null when nothing changed.
+   */
+  dealerChangedReason: string | null;
 }
 
 /** Short, readable, and unmistakably ours in Juspay's dashboard. */
@@ -85,6 +93,9 @@ export async function createOrder(
   if (!location.regionCode) {
     throw new OrderError('no_price', 'We do not sell online in your area yet.');
   }
+  // The dealer they picked at the dealer step, or the pincode's own. Pricing
+  // stays keyed on the region; stock does not — it belongs to a dealer.
+  const dealer = await dealerForLead(prisma, lead, location.dealer);
 
   const price = await resolvePrice(prisma, model.code, location.regionCode);
   if (!price) {
@@ -129,25 +140,59 @@ export async function createOrder(
 
   const orderId = existing?.orderId ?? newOrderId();
 
+  /*
+   * Which dealer actually fulfils this.
+   *
+   * Their chosen showroom first, then the others within range, nearest first.
+   * If the nearest is out of this model we move to the next rather than
+   * refusing the sale — the customer wants a scooter, not a particular
+   * building, and the alternative is turning away a purchase over stock
+   * sitting twenty minutes down the road.
+   *
+   * Nothing outside the radius is a candidate. findNearbyDealers enforces that,
+   * so an empty list here means we genuinely cannot serve this pincode.
+   */
+  const nearby = await findNearbyDealers(prisma, lead.pincode);
+  const candidates = [
+    ...(dealer ? [dealer.code] : []),
+    ...nearby.dealers.map((d) => d.code).filter((code) => code !== dealer?.code),
+  ];
+
+  const fulfillingCode = await firstDealerWithStock(prisma, model.code, candidates);
+  if (!fulfillingCode) {
+    throw new OrderError('out_of_stock', `${model.name} is out of stock near you.`);
+  }
+
+  // Say so when we have moved them. Quietly reassigning someone's showroom is
+  // how a customer turns up at the wrong one.
+  const dealerSwitched = dealer !== null && fulfillingCode !== dealer.code;
+
   // Hold a unit BEFORE the customer leaves to pay. Idempotent on orderId, so a
   // retry re-arms the same hold rather than taking a second scooter.
+  //
+  // firstDealerWithStock reads without a lock, so this can still lose a race
+  // against another buyer. reserve() takes the row lock and is the authority;
+  // losing here is correct behaviour, not a bug.
   let reservation: { expiresAt: Date };
   try {
     reservation = await reserve(prisma, {
       orderId,
       modelCode: model.code,
-      regionCode: location.regionCode,
+      dealerCode: fulfillingCode,
     });
   } catch (error) {
     if (error instanceof OutOfStockError) {
-      throw new OrderError('out_of_stock', `${model.name} is out of stock in your area.`);
+      throw new OrderError('out_of_stock', `${model.name} is out of stock near you.`);
     }
     throw error;
   }
 
   const common = {
     leadId: lead.id,
-    dealerCode: location.dealer?.code ?? null,
+    // The dealer that is actually fulfilling, which may not be the one they
+    // picked. This is the record the dealer notification and the confirmation
+    // both read.
+    dealerCode: fulfillingCode,
     modelCode: model.code,
     colourCode,
     regionCode: location.regionCode,
@@ -182,10 +227,14 @@ export async function createOrder(
       intent: 'buy',
       modelCode: model.code,
       colourCode,
-      dealerCode: location.dealer?.code ?? null,
+      dealerCode: fulfillingCode,
       status: 'payment_started',
     },
   });
+
+  const fulfilling =
+    nearby.dealers.find((d) => d.code === fulfillingCode) ??
+    (dealer?.code === fulfillingCode ? dealer : null);
 
   return {
     orderId,
@@ -194,5 +243,12 @@ export async function createOrder(
     amountCharged: amountCharged.toFixed(2),
     paymentType: input.paymentType,
     reservationExpiresAt: reservation.expiresAt.toISOString(),
+    dealer: fulfilling
+      ? { code: fulfilling.code, name: fulfilling.name, phone: fulfilling.phone }
+      : null,
+    dealerChangedReason:
+      dealerSwitched && fulfilling
+        ? `${dealer?.name} is out of stock for the ${model.name}, so your order will be fulfilled by ${fulfilling.name}.`
+        : null,
   };
 }

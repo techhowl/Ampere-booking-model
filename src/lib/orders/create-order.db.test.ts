@@ -19,6 +19,7 @@ const { phoneColumns } = await import('@/lib/crypto/phone');
 
 const MODEL = 'nexus-ex-plus';
 const REGION = 'west';
+const DEALER = 'AMP-W-001';
 const RETURN_URL = 'https://buy.ampere-electric.com/buy/return';
 
 const d = (n: number) => new Prisma.Decimal(n);
@@ -51,7 +52,7 @@ beforeEach(async () => {
     data: { pincode: '400001', stateCode: 'MH', regionCode: REGION, dealerCode: 'AMP-W-001' },
   });
   await prisma.inventory.create({
-    data: { modelCode: MODEL, regionCode: REGION, unitsTotal: 5, unitsReserved: 0 },
+    data: { modelCode: MODEL, dealerCode: DEALER, unitsTotal: 5, unitsReserved: 0 },
   });
 
   const lead = await prisma.lead.create({
@@ -151,7 +152,7 @@ describe('creating an order', () => {
     await createOrder(prisma, juspay, order(), RETURN_URL);
 
     const stock = await prisma.inventory.findUniqueOrThrow({
-      where: { modelCode_regionCode: { modelCode: MODEL, regionCode: REGION } },
+      where: { modelCode_dealerCode: { modelCode: MODEL, dealerCode: DEALER } },
     });
     // Reserved, not sold. The decrement waits for the money.
     expect(stock.unitsReserved).toBe(1);
@@ -163,7 +164,7 @@ describe('creating an order', () => {
     const row = await prisma.order.findUniqueOrThrow({ where: { orderId: created.orderId } });
 
     expect(row.dealerCode).toBe('AMP-W-001');
-    expect(row.regionCode).toBe(REGION);
+    expect(row.dealerCode).toBe(DEALER);
     expect(row.status).toBe('initiated');
   });
 
@@ -185,7 +186,7 @@ describe('creating an order', () => {
 
   it('refuses when the model is out of stock', async () => {
     await prisma.inventory.update({
-      where: { modelCode_regionCode: { modelCode: MODEL, regionCode: REGION } },
+      where: { modelCode_dealerCode: { modelCode: MODEL, dealerCode: DEALER } },
       data: { unitsTotal: 0 },
     });
 
@@ -214,7 +215,7 @@ describe('retrying the same intent', () => {
     expect(await prisma.order.count()).toBe(1);
 
     const stock = await prisma.inventory.findUniqueOrThrow({
-      where: { modelCode_regionCode: { modelCode: MODEL, regionCode: REGION } },
+      where: { modelCode_dealerCode: { modelCode: MODEL, dealerCode: DEALER } },
     });
     expect(stock.unitsReserved).toBe(1);
   });
@@ -249,7 +250,7 @@ describe('resolving what happened', () => {
     await applyStatus(prisma, created.orderId, 'paid', 'webhook');
 
     const stock = await prisma.inventory.findUniqueOrThrow({
-      where: { modelCode_regionCode: { modelCode: MODEL, regionCode: REGION } },
+      where: { modelCode_dealerCode: { modelCode: MODEL, dealerCode: DEALER } },
     });
     expect(stock.unitsTotal).toBe(4);
     expect(stock.unitsReserved).toBe(0);
@@ -260,7 +261,7 @@ describe('resolving what happened', () => {
     await applyStatus(prisma, created.orderId, 'failed', 'webhook');
 
     const stock = await prisma.inventory.findUniqueOrThrow({
-      where: { modelCode_regionCode: { modelCode: MODEL, regionCode: REGION } },
+      where: { modelCode_dealerCode: { modelCode: MODEL, dealerCode: DEALER } },
     });
     expect(stock.unitsTotal).toBe(5);
     expect(stock.unitsReserved).toBe(0);
@@ -279,7 +280,7 @@ describe('resolving what happened', () => {
 
     // And the sale is not decremented twice by the replays.
     const stock = await prisma.inventory.findUniqueOrThrow({
-      where: { modelCode_regionCode: { modelCode: MODEL, regionCode: REGION } },
+      where: { modelCode_dealerCode: { modelCode: MODEL, dealerCode: DEALER } },
     });
     expect(stock.unitsTotal).toBe(4);
   });
@@ -372,7 +373,7 @@ describe('the webhook', () => {
     await recordWebhook(prisma, payload);
 
     const stock = await prisma.inventory.findUniqueOrThrow({
-      where: { modelCode_regionCode: { modelCode: MODEL, regionCode: REGION } },
+      where: { modelCode_dealerCode: { modelCode: MODEL, dealerCode: DEALER } },
     });
     expect(stock.unitsTotal).toBe(4);
     expect(await prisma.paymentEvent.count()).toBe(3);

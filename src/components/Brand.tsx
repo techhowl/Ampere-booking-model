@@ -3,8 +3,8 @@ import type { SVGProps } from 'react';
 /**
  * Brand marks and icons.
  *
- * ASSET SLOT: `AmpereLogo` draws a stand-in wordmark. Replace its body with
- * Ampere's real mark and every header and footer picks it up.
+ * The two logos are Ampere's and Greaves' own artwork, in public/brand/. Both
+ * are white on transparent, drawn for the near-black header and footer.
  *
  * Icons are inline SVG on a 24x24 grid with a consistent 1.6 stroke. Inline
  * because a dozen small glyphs are not worth a dozen network requests on a
@@ -14,18 +14,28 @@ import type { SVGProps } from 'react';
 
 export function AmpereLogo({ className }: { className?: string }) {
   return (
-    <span className={`inline-flex items-baseline gap-2 ${className ?? ''}`}>
-      <BoltMark className="size-[1.15em] translate-y-[0.1em]" />
-      <span className="text-[15px] font-bold uppercase tracking-[0.18em]">Ampere</span>
-    </span>
+    // eslint-disable-next-line @next/next/no-img-element -- a 6KB static mark; next/image adds nothing
+    <img
+      src="/brand/ampere-logo.png"
+      alt="Ampere"
+      width={680}
+      height={98}
+      className={`h-4.5 w-auto lg:h-5 ${className ?? ''}`}
+    />
   );
 }
 
-export function BoltMark(props: SVGProps<SVGSVGElement>) {
+export function GreavesLogo({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden {...props}>
-      <path d="M13.5 2 4 14h6l-1.5 8L20 10h-6.5z" />
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element -- static mark, as above
+    <img
+      src="/brand/greaves-logo.png"
+      alt="Greaves Electric Mobility"
+      width={713}
+      height={280}
+      loading="lazy"
+      className={`h-12 w-auto ${className ?? ''}`}
+    />
   );
 }
 
@@ -140,6 +150,55 @@ export function ExpandIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden {...props}>
       <path d="M4 9V4.8A.8.8 0 0 1 4.8 4H9M20 9V4.8a.8.8 0 0 0-.8-.8H15M4 15v4.2c0 .4.4.8.8.8H9M20 15v4.2a.8.8 0 0 1-.8.8H15" {...s} />
+    </svg>
+  );
+}
+
+export function ArrowRightIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden {...props}>
+      <path d="M5 12h14m0 0-6-6m6 6-6 6" {...s} strokeWidth={1.8} />
+    </svg>
+  );
+}
+
+/** Buy now. */
+export function BagIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden {...props}>
+      <path d="M5.5 8.5h13l-1 11a1.5 1.5 0 0 1-1.5 1.4H8a1.5 1.5 0 0 1-1.5-1.4z" {...s} />
+      <path d="M9 8.5V7a3 3 0 0 1 6 0v1.5" {...s} />
+    </svg>
+  );
+}
+
+/** Test ride. */
+export function CalendarIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden {...props}>
+      <rect x="4" y="5.5" width="16" height="14.5" rx="2" {...s} />
+      <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" {...s} />
+      <path d="m9.5 15 1.8 1.7 3.4-3.4" {...s} />
+    </svg>
+  );
+}
+
+/** A dealership. */
+export function StoreIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden {...props}>
+      <path d="M4.5 9.5 6 4.5h12l1.5 5" {...s} />
+      <path d="M4.5 9.5a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0" {...s} />
+      <path d="M5.5 12v7.5h13V12M10 19.5v-4h4v4" {...s} />
+    </svg>
+  );
+}
+
+export function HomeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden {...props}>
+      <path d="m4 11 8-6.5 8 6.5" {...s} />
+      <path d="M6 9.5v10h12v-10M10 19.5v-5h4v5" {...s} />
     </svg>
   );
 }

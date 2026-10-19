@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Model } from '@/lib/catalog/catalog';
 
 /**
@@ -34,9 +34,19 @@ export function ProductImage({ model, colourCode, className, priority }: Props) 
   // colourless `<model>.webp` would 404, because no such file is shot.
   const colour = model.colours.find((c) => c.code === colourCode) ?? model.colours[0];
 
+  const img = useRef<HTMLImageElement>(null);
+  const fail = () => setState((current) => (current === 'colour' ? 'model' : 'placeholder'));
+
   useEffect(() => {
     setState('colour');
   }, [colourCode, model.code]);
+
+  // A server-rendered image can 404 before React hydrates and starts
+  // listening, and then onError never fires. Check for that on mount.
+  useEffect(() => {
+    const el = img.current;
+    if (el?.complete && el.naturalWidth === 0) fail();
+  }, [state]);
 
   if (state === 'placeholder' || !colour) {
     return <ProductPlaceholder model={model} hex={colour?.hex ?? '#394150'} className={className} />;
@@ -52,11 +62,12 @@ export function ProductImage({ model, colourCode, className, priority }: Props) 
     // do not yet. Swap to next/image once the photography is committed.
     // eslint-disable-next-line @next/next/no-img-element
     <img
+      ref={img}
       src={src}
       alt={`Ampere ${model.name}${colour ? ` in ${colour.name}` : ''}`}
       className={className}
       loading={priority ? 'eager' : 'lazy'}
-      onError={() => setState((current) => (current === 'colour' ? 'model' : 'placeholder'))}
+      onError={fail}
     />
   );
 }
