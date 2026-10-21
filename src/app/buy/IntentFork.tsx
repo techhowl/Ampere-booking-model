@@ -70,10 +70,7 @@ export function IntentFork({
           icon={<CalendarIcon className="size-6" />}
           title="Book a Test Ride"
           blurb="Feel it on the road before you decide."
-          points={[
-            'Free, no obligation',
-            dealer?.homeServiceable ? 'At home or at the showroom' : 'At the showroom',
-          ]}
+          points={['Free, no obligation', dealer ? `At ${dealer.name}` : 'At the showroom']}
           selected={choice === 'testride'}
           onSelect={() => onSelect('testride')}
         />

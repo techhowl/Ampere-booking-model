@@ -31,6 +31,47 @@ describe('arriving from a product page', () => {
     const prefill = parsePrefill({ model: 'nexus-ex-plus', color: 'carbon-knight' });
     expect(prefill.colourCode).toBe('carbon-knight');
   });
+
+  it("accepts the main site's own page names", () => {
+    expect(parsePrefill({ model: 'gmax' }).modelCode).toBe('magnus-gmax');
+    expect(parsePrefill({ model: 'reovyb' }).modelCode).toBe('reo-vyb');
+    expect(parsePrefill({ model: 'Nexus' }).modelCode).toBe('nexus-ex-plus');
+    expect(parsePrefill({ model: 'gmax' }).modelFrom).toBe('link');
+  });
+});
+
+describe('arriving from a product page without ?model=', () => {
+  const from = (referer: string, params = {}) => parsePrefill(params, { referer });
+
+  it('recognises the product page it came from', () => {
+    expect(from('https://ampere-electric.com/nexus-ex-plus').modelCode).toBe('nexus-ex-plus');
+    expect(from('https://www.ampere-electric.com/gmax?utm_source=x').modelCode).toBe('magnus-gmax');
+    expect(from('https://ampere-electric.com/reovyb/').modelFrom).toBe('referrer');
+  });
+
+  it('preselects nothing from a page that is not a product', () => {
+    expect(from('https://ampere-electric.com/').modelCode).toBeNull();
+    expect(from('https://ampere-electric.com/about-us').modelCode).toBeNull();
+    expect(from('https://ampere-electric.com/buy?model=gmax').modelCode).toBeNull();
+  });
+
+  it('ignores any other site', () => {
+    expect(from('https://evil.example/nexus-ex-plus').modelCode).toBeNull();
+    expect(from('https://ampere-electric.com.evil.example/gmax').modelCode).toBeNull();
+    expect(from('not a url').modelCode).toBeNull();
+  });
+
+  it('lets the link win over the referrer', () => {
+    const prefill = from('https://ampere-electric.com/gmax', { model: 'reo-vyb' });
+    expect(prefill.modelCode).toBe('reo-vyb');
+    expect(prefill.modelFrom).toBe('link');
+  });
+
+  it('does not fall back to the referrer when the link names a bad model', () => {
+    const prefill = from('https://ampere-electric.com/gmax', { model: 'foo' });
+    expect(prefill.modelCode).toBeNull();
+    expect(prefill.dropped).toContain('model=foo');
+  });
 });
 
 describe('invalid values are dropped silently', () => {

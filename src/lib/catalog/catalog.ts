@@ -62,6 +62,13 @@ export interface Model {
    * and renders a placeholder when neither exists.
    */
   image: string;
+  /**
+   * Other names a link may use for this model — the slug of its page on
+   * ampere-electric.com where that differs from the code. Lets the main site
+   * link with its own page names (?model=gmax) and lets a referring product
+   * page be recognised.
+   */
+  aliases: readonly string[];
 }
 
 export interface Region {
@@ -139,6 +146,7 @@ export const MODELS: readonly Model[] = [
     colours: [CARBON_KNIGHT, STEEL_GREY],
     specs: { rangeKm: 136, topSpeedKmph: 93, chargeHours: 3.1 },
     image: 'nexus-ex-plus',
+    aliases: ['nexus'],
   },
   {
     // "New Magnus GMax (with Intellipack)" on the site. No photography
@@ -150,6 +158,9 @@ export const MODELS: readonly Model[] = [
     colours: [MATCHA_GREEN],
     specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: 5.45 },
     image: 'magnus-gmax-iot',
+    // Its page on the main site is still in draft. Add the slug here when it
+    // is published.
+    aliases: [],
   },
   {
     code: 'magnus-gmax',
@@ -159,6 +170,8 @@ export const MODELS: readonly Model[] = [
     colours: [MATCHA_GREEN, MONSOON_BLUE, CINNAMON_COPPER],
     specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: 5.45 },
     image: 'magnus-gmax',
+    // ampere-electric.com/gmax
+    aliases: ['gmax'],
   },
   {
     code: 'magnus-neo',
@@ -168,6 +181,7 @@ export const MODELS: readonly Model[] = [
     colours: [OCEAN_BLUE, MISTY_MAUVE, BUTTER_YELLOW, MATCHA_GREEN],
     specs: { rangeKm: 125, topSpeedKmph: 60, chargeHours: 5 },
     image: 'magnus-neo',
+    aliases: [],
   },
   {
     code: 'reo-vyb',
@@ -177,6 +191,8 @@ export const MODELS: readonly Model[] = [
     colours: [TEAL, PASTEL_PURPLE, VYB_WHITE, VYB_BLACK],
     specs: { rangeKm: 80, topSpeedKmph: 25, chargeHours: 4 },
     image: 'reo-vyb',
+    // ampere-electric.com/reovyb
+    aliases: ['reovyb'],
   },
 ] as const;
 
@@ -193,6 +209,19 @@ const REGION_BY_STATE = new Map(
 export function getModel(code: string | null | undefined): Model | null {
   if (!code) return null;
   return MODELS_BY_CODE.get(code) ?? null;
+}
+
+const MODELS_BY_NAME = new Map(
+  MODELS.flatMap((m) => [m.code, ...m.aliases].map((name) => [name.toLowerCase(), m] as const)),
+);
+
+/**
+ * A model by its code or any of its aliases, case-insensitively. For reading
+ * links and page paths; everything internal uses the code and getModel().
+ */
+export function findModel(name: string | null | undefined): Model | null {
+  if (!name) return null;
+  return MODELS_BY_NAME.get(name.trim().toLowerCase()) ?? null;
 }
 
 export function getRegion(code: string | null | undefined): Region | null {

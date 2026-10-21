@@ -33,6 +33,22 @@ export const REQUEST_LIMITS = {
   device: { max: 10, windowSeconds: 3600 },
 } as const;
 
+/**
+ * UAT test mode only (env.otpEchoEnabled — never true in production). The
+ * code is shown on screen and no SMS is sent, so there is no bill to protect,
+ * and a team testing from one office IP would otherwise lock itself out after
+ * twenty codes. The resend cooldown and the verify-attempt limit still apply.
+ */
+export const UAT_REQUEST_LIMITS = {
+  phone: { max: 50, windowSeconds: 3600 },
+  ip: { max: 500, windowSeconds: 3600 },
+  device: { max: 100, windowSeconds: 3600 },
+} as const;
+
+export function requestLimits(): typeof REQUEST_LIMITS | typeof UAT_REQUEST_LIMITS {
+  return env.otpEchoEnabled ? UAT_REQUEST_LIMITS : REQUEST_LIMITS;
+}
+
 export type OtpRequestFailure =
   | { reason: 'rate_limited'; retryAfterSeconds: number; blockedBy: string }
   | { reason: 'cooldown'; retryAfterSeconds: number }
@@ -112,11 +128,10 @@ export async function requestOtp(
     return { ok: false, reason: 'cooldown', retryAfterSeconds: cooldown };
   }
 
-  const rules: LimitRule[] = [
-    { kind: 'phone', subject: phoneHash, ...REQUEST_LIMITS.phone },
-  ];
-  if (ip) rules.push({ kind: 'ip', subject: ip, ...REQUEST_LIMITS.ip });
-  if (deviceId) rules.push({ kind: 'device', subject: deviceId, ...REQUEST_LIMITS.device });
+  const limits = requestLimits();
+  const rules: LimitRule[] = [{ kind: 'phone', subject: phoneHash, ...limits.phone }];
+  if (ip) rules.push({ kind: 'ip', subject: ip, ...limits.ip });
+  if (deviceId) rules.push({ kind: 'device', subject: deviceId, ...limits.device });
 
   const decision = await consume(prisma, SCOPE, rules);
   if (!decision.allowed) {

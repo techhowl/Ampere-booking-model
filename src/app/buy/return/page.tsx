@@ -33,14 +33,25 @@ export default async function ReturnPage({
     <div className="flex min-h-dvh flex-col">
       <SiteHeader />
       <main className="flex-1">
-        <div className="mx-auto max-w-xl px-5 py-10">
+        <div className="mx-auto max-w-2xl px-3 py-6 sm:px-5 sm:py-12">
           {orderId ? (
             <ReturnResolver orderId={orderId} />
           ) : (
-            <p className="rounded-2xl bg-white px-5 py-6 text-[15px] leading-relaxed text-amp-ink">
-              We could not tell which booking this was. If you have just paid, check your
-              messages — we send a confirmation as soon as it clears.
-            </p>
+            <div className="rounded-3xl bg-white p-6 ring-1 ring-black/5 sm:p-8">
+              <h1 className="text-[22px] font-bold leading-tight text-amp-ink">
+                We couldn&apos;t tell which booking this was
+              </h1>
+              <p className="mt-2 text-[14px] leading-relaxed text-amp-muted">
+                If you&apos;ve just paid, your dealer will call you to confirm. You can also
+                start again from the scooters.
+              </p>
+              <a
+                href="/buy"
+                className="mt-4 inline-block text-[14px] font-semibold text-amp-ink underline underline-offset-4"
+              >
+                Back to the scooters
+              </a>
+            </div>
           )}
         </div>
       </main>

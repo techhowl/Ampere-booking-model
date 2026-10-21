@@ -1,4 +1,4 @@
-import { getModel, isValidColourCode } from '@/lib/catalog/catalog';
+import { findModel, isValidColourCode, type Model } from '@/lib/catalog/catalog';
 import { LEAD_INTENTS } from '@/lib/schemas/lead';
 
 /**
@@ -11,7 +11,17 @@ import { LEAD_INTENTS } from '@/lib/schemas/lead';
  *     no preselection rather than an error
  *   - the full original query string is saved regardless of what we parse, so
  *     attribution questions can be answered later without a code change
+ *
+ * Where the product comes from, in order:
+ *   1. ?model= in the link — our code or the main site's page name
+ *   2. the product page the customer was on, from the Referer header, when the
+ *      link carries no model. Best effort: browsers often send only the
+ *      origin across sites, so links with ?model= are the reliable route.
+ *   3. nothing — the customer picks in step two
  */
+
+/** The marketing site. A referring page on any other host is ignored. */
+const MAIN_SITE_HOSTS = new Set(['ampere-electric.com', 'www.ampere-electric.com']);
 
 export type RawSearchParams = Record<string, string | string[] | undefined>;
 
@@ -25,6 +35,8 @@ export interface Prefill {
    * every touchpoint passes through.
    */
   dealerCode: string | null;
+  /** How modelCode was decided. Null when nothing was preselected. */
+  modelFrom: 'link' | 'referrer' | null;
   /** Carried from any touchpoint that already knows it. */
   pincode: string | null;
   src: string | null;
@@ -52,7 +64,10 @@ function clamp(value: string | null): string | null {
   return trimmed.slice(0, MAX_VALUE_LENGTH);
 }
 
-export function parsePrefill(params: RawSearchParams): Prefill {
+export function parsePrefill(
+  params: RawSearchParams,
+  context: { referer?: string | null } = {},
+): Prefill {
   const dropped: string[] = [];
 
   // Keep everything, whatever we make of it. This is the backstop that answers
@@ -64,8 +79,12 @@ export function parsePrefill(params: RawSearchParams): Prefill {
   }
 
   const requestedModel = clamp(first(params.model));
-  const model = getModel(requestedModel);
+  let model = findModel(requestedModel);
   if (requestedModel && !model) dropped.push(`model=${requestedModel}`);
+
+  // No product in the link: the product page they were on, if we can tell.
+  const fromReferrer = requestedModel ? null : modelFromReferer(context.referer);
+  if (fromReferrer) model = fromReferrer;
 
   const requestedColour = clamp(first(params.colour) ?? first(params.color));
   let colourCode: string | null = null;
@@ -103,6 +122,7 @@ export function parsePrefill(params: RawSearchParams): Prefill {
 
   return {
     modelCode: model?.code ?? null,
+    modelFrom: model ? (fromReferrer ? 'referrer' : 'link') : null,
     colourCode,
     intent,
     // Validated against the dealer master at save time, not here — this is
@@ -116,6 +136,24 @@ export function parsePrefill(params: RawSearchParams): Prefill {
     sourceRaw: Object.keys(sourceRaw).length > 0 ? sourceRaw : null,
     dropped,
   };
+}
+
+/**
+ * ampere-electric.com/gmax → Magnus GMax. Only the first path segment, only on
+ * the main site, and only when it names a model — /, /about-us and our own
+ * /buy all come back null.
+ */
+function modelFromReferer(referer: string | null | undefined): Model | null {
+  if (!referer) return null;
+  let url: URL;
+  try {
+    url = new URL(referer);
+  } catch {
+    return null;
+  }
+  if (!MAIN_SITE_HOSTS.has(url.hostname.toLowerCase())) return null;
+  const slug = url.pathname.split('/').filter(Boolean)[0];
+  return findModel(slug);
 }
 
 /** The attribution slice of the prefill, in the shape POST /api/leads wants. */

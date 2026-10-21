@@ -5,13 +5,17 @@ import type { ModelAvailability } from '@/lib/catalog/availability';
 import type { NearbyDealer } from '@/lib/schemas/dealer';
 import { HELP_TOPICS, HELP_TOPIC_LABELS } from '@/lib/schemas/test-ride';
 import type { OfferedDay } from '@/lib/test-rides/slots';
-import { ChoiceCard, FOCUS, Notice, Pill, PrimaryButton, SelectionDot, Skeleton } from '@/components/ui';
-import { CheckIcon, HomeIcon, PhoneIcon, StoreIcon } from '@/components/Brand';
+import { FOCUS, Notice, Pill, PrimaryButton, Skeleton } from '@/components/ui';
+import { CheckIcon, PhoneIcon, StoreIcon } from '@/components/Brand';
 import { StepActions, StepHeader } from './StepFrame';
 
 /**
- * Step five, test ride: where, which day, which slot, and anything we can help
- * with on the day.
+ * Step five, test ride: which day, which slot, and anything we can help with
+ * on the day.
+ *
+ * Always at the showroom chosen in step three. Home rides are not offered for
+ * now, so the choice is not shown at all — the backend still understands
+ * 'home' for when they are.
  *
  * Slots come from the server, computed in IST. Nothing here reads the browser
  * clock — a laptop set to the wrong timezone would otherwise be offered
@@ -26,6 +30,8 @@ interface Props {
   colourCode: string | null;
   dealer: NearbyDealer | null;
   onBooked: (booking: Booking) => void;
+  /** The session timed out; the journey asks for the OTP again. */
+  onExpired: () => void;
   onBack: () => void;
 }
 
@@ -36,21 +42,17 @@ export interface Booking {
   slot: string;
   dealer: { name: string; phone: string | null; address: string | null };
   modelName: string;
-  dealerNotified: boolean;
+  /** Null when not known — a confirmation shown again after a refresh. */
+  dealerNotified: boolean | null;
 }
 
-export function TestRideStep({ model, colourCode, dealer, onBooked, onBack }: Props) {
+export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, onBack }: Props) {
   const [days, setDays] = useState<OfferedDay[] | null>(null);
-  const [mode, setMode] = useState<'home' | 'dealer'>('dealer');
   const [date, setDate] = useState<string | null>(null);
   const [slot, setSlot] = useState<string | null>(null);
   const [topics, setTopics] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // The chosen dealer says whether they ride to people's homes. The server
-  // still falls back to the showroom, and says so, if that changes.
-  const homeOffered = dealer?.homeServiceable ?? false;
 
   useEffect(() => {
     let cancelled = false;
@@ -95,7 +97,7 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onBack }: Pr
         body: JSON.stringify({
           modelCode: model.code,
           colourCode,
-          mode,
+          mode: 'dealer',
           slotDate: date,
           slotWindow: slot,
           // The schema takes one topic; send the first chosen. Multi-select is
@@ -108,6 +110,7 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onBack }: Pr
         onBooked((await res.json()) as Booking);
         return;
       }
+      if (res.status === 401) return onExpired();
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
       setError(body?.message ?? 'We could not book that slot. Please try another.');
     } catch {
@@ -148,25 +151,15 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onBack }: Pr
     <form onSubmit={submit} noValidate className="flex flex-col gap-7">
       {header}
 
-      <Group label="Where">
-        <div className="grid grid-cols-2 gap-3">
-          <ModeCard
-            icon={<StoreIcon className="size-5" />}
-            title="At the showroom"
-            detail={dealer?.name ?? 'Your dealer'}
-            selected={mode === 'dealer'}
-            onSelect={() => setMode('dealer')}
-          />
-          <ModeCard
-            icon={<HomeIcon className="size-5" />}
-            title="At home"
-            detail={homeOffered ? 'We bring it to you' : 'Not offered by this dealer yet'}
-            selected={mode === 'home'}
-            disabled={!homeOffered}
-            onSelect={() => setMode('home')}
-          />
+      {dealer && (
+        <div className="flex items-start gap-3 rounded-2xl bg-amp-page/70 px-4 py-3">
+          <StoreIcon className="mt-0.5 size-5 shrink-0 text-amp-ink" />
+          <p className="text-[13px] leading-relaxed text-amp-muted">
+            At <span className="font-semibold text-amp-ink">{dealer.name}</span>
+            {dealer.address ? <>, {dealer.address}</> : null}
+          </p>
         </div>
-      </Group>
+      )}
 
       <Group label="Day">
         <div className="amp-scroll -mx-4 flex gap-2.5 overflow-x-auto px-4 pb-1 sm:-mx-8 sm:px-8">
@@ -306,45 +299,6 @@ function Group({
   );
 }
 
-function ModeCard({
-  icon,
-  title,
-  detail,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  detail: string;
-  selected: boolean;
-  disabled?: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <ChoiceCard selected={selected} disabled={disabled} onClick={onSelect}>
-      <span className="flex flex-col gap-3 p-4">
-        <span className="flex items-start justify-between">
-          <span
-            aria-hidden
-            className={[
-              'flex size-9 items-center justify-center rounded-xl',
-              selected ? 'bg-amp-accent-fill text-white' : 'bg-amp-page text-amp-ink',
-            ].join(' ')}
-          >
-            {icon}
-          </span>
-          <SelectionDot selected={selected} />
-        </span>
-        <span>
-          <span className="block text-[14px] font-semibold text-amp-ink">{title}</span>
-          <span className="mt-0.5 block text-[12px] leading-snug text-amp-muted">{detail}</span>
-        </span>
-      </span>
-    </ChoiceCard>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 
 export function TestRideConfirmation({
@@ -404,9 +358,11 @@ export function TestRideConfirmation({
       </div>
 
       <p className="text-center text-[13px] leading-relaxed text-amp-muted">
-        {booking.dealerNotified
+        {booking.dealerNotified === true
           ? 'The dealer has been notified and will confirm with you shortly.'
-          : 'We are still passing this to the dealer. Your booking is confirmed either way.'}
+          : booking.dealerNotified === false
+            ? 'We are still passing this to the dealer. Your booking is confirmed either way.'
+            : 'Your dealer will confirm with you shortly.'}
       </p>
 
       {/* Spec 4: the cross-sell re-opens the other branch. A completed test

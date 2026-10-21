@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { normalisePhone, phoneColumns } from '@/lib/crypto/phone';
-import { resolvePincode } from '@/lib/dealers/resolve';
+import { resolvePincode, type PincodeResolution } from '@/lib/dealers/resolve';
 import { env } from '@/lib/env';
 import { isValidColourCode } from '@/lib/catalog/catalog';
 import type { LeadIdentityInput, LeadCreatedResponse } from '@/lib/schemas/lead';
@@ -82,9 +82,15 @@ export async function saveLead(
   let created: boolean;
 
   if (existing) {
-    // Patch the same row. phoneVerified is deliberately untouched — changing
-    // the number is handled by the OTP step, not by re-submitting the form.
-    await prisma.lead.update({ where: { id: existing.id }, data: common });
+    // Patch the same row. Re-saving the same number leaves phoneVerified as it
+    // was. A DIFFERENT number starts unverified: the proof was for the old
+    // one, and carrying it over would let anyone verify their own phone, swap
+    // in someone else's, and book against it with no OTP.
+    const numberChanged = existing.phoneHash !== phone.phoneHash;
+    await prisma.lead.update({
+      where: { id: existing.id },
+      data: numberChanged ? { ...common, phoneVerified: false } : common,
+    });
     leadId = existing.id;
     created = false;
   } else {
@@ -100,23 +106,36 @@ export async function saveLead(
 
   return {
     created,
-    response: {
-      leadId,
-      phoneLast4: phone.phoneLast4,
-      pincode: input.pincode,
-      region: location.regionCode
-        ? { code: location.regionCode, name: location.regionName ?? location.regionCode }
-        : null,
-      dealer: location.dealer
-        ? {
-            code: location.dealer.code,
-            name: location.dealer.name,
-            phone: location.dealer.phone,
-            homeServiceable: location.dealer.homeServiceable,
-          }
-        : null,
-      serviceable: location.serviceable,
-    },
+    response: toLeadResponse(leadId, phone.phoneLast4, input.pincode, location),
+  };
+}
+
+/**
+ * What the browser is told about a lead — here after a save, and again when a
+ * refreshed page resumes one. Never the phone number, only its last four.
+ */
+export function toLeadResponse(
+  leadId: string,
+  phoneLast4: string,
+  pincode: string,
+  location: PincodeResolution,
+): LeadCreatedResponse {
+  return {
+    leadId,
+    phoneLast4,
+    pincode,
+    region: location.regionCode
+      ? { code: location.regionCode, name: location.regionName ?? location.regionCode }
+      : null,
+    dealer: location.dealer
+      ? {
+          code: location.dealer.code,
+          name: location.dealer.name,
+          phone: location.dealer.phone,
+          homeServiceable: location.dealer.homeServiceable,
+        }
+      : null,
+    serviceable: location.serviceable,
   };
 }
 

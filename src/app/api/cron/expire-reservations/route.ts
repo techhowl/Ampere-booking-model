@@ -42,6 +42,14 @@ function authorised(request: NextRequest): boolean {
   return timingSafeEqual(a, b);
 }
 
+/**
+ * Vercel Cron calls with GET and the same `Authorization: Bearer CRON_SECRET`
+ * header, so the UAT copy on Vercel needs no other scheduler.
+ */
+export async function GET(request: NextRequest) {
+  return POST(request);
+}
+
 export async function POST(request: NextRequest) {
   if (!authorised(request)) {
     return NextResponse.json({ error: 'unauthorised' }, { status: 401 });

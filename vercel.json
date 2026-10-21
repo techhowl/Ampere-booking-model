@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "pnpm exec prisma generate && pnpm build",
+  "regions": ["bom1"],
+  "crons": [{ "path": "/api/cron/expire-reservations", "schedule": "30 2 * * *" }]
+}

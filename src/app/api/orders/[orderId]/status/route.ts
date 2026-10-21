@@ -42,7 +42,7 @@ export async function GET(
 
   const owner = await prisma.order.findUnique({
     where: { orderId },
-    select: { leadId: true },
+    select: { leadId: true, lead: { select: { name: true } } },
   });
   if (!owner || owner.leadId !== session.leadId) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
@@ -53,5 +53,11 @@ export async function GET(
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
 
-  return NextResponse.json(outcome, { headers: { 'Cache-Control': 'no-store' } });
+  // Their own first name, for the confirmation. Only ever to the owner.
+  const firstName = owner.lead.name.trim().split(/\s+/)[0] ?? null;
+
+  return NextResponse.json(
+    { ...outcome, firstName },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
 }

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
-import { SESSION_COOKIE, parseSession } from '@/lib/crypto/session';
+import { requireJourney, writeSession } from '@/lib/http/session';
 import { chooseDealerSchema } from '@/lib/schemas/dealer';
 import { chooseDealer } from '@/lib/leads/choose-dealer';
 import {
@@ -28,13 +28,10 @@ const MESSAGES: Record<string, string> = {
 };
 
 export async function POST(request: NextRequest) {
-  const session = parseSession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) {
-    return NextResponse.json(
-      { error: 'no_lead', message: MESSAGES.lead_not_found },
-      { status: 409 },
-    );
-  }
+  // A live, verified journey — see lib/http/session.ts.
+  const gate = requireJourney(request);
+  if (!gate.ok) return gate.response;
+  const { session } = gate;
 
   let raw: unknown;
   try {
@@ -68,7 +65,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(body, { status: statusCode });
+    return writeSession(NextResponse.json(body, { status: statusCode }), session);
   } catch (error) {
     if (error instanceof IdempotencyKeyReusedError) {
       return NextResponse.json({ error: 'idempotency_key_reused' }, { status: 422 });

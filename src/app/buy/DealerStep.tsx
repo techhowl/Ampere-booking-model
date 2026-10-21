@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { formatPhoneForDisplay } from '@/lib/phone-format';
 import type { NearbyDealer, NearbyDealersResponse } from '@/lib/schemas/dealer';
 import { Notice, PrimaryButton, SelectionDot, Skeleton } from '@/components/ui';
-import { HomeIcon, PhoneIcon, PinIcon, StoreIcon } from '@/components/Brand';
+import { PhoneIcon, PinIcon, StoreIcon } from '@/components/Brand';
 import { SUPPORT_PHONE } from '@/lib/contact';
 import { StepActions, StepHeader } from './StepFrame';
 
@@ -24,10 +24,20 @@ interface Props {
   /** Already chosen, or carried in from the dealer locator. */
   preferredCode: string | null;
   onConfirmed: (dealer: NearbyDealer) => void;
+  /** The session timed out; the journey asks for the OTP again. */
+  onExpired: () => void;
   onBack: () => void;
 }
 
-export function DealerStep({ pincode, cached, onLoaded, preferredCode, onConfirmed, onBack }: Props) {
+export function DealerStep({
+  pincode,
+  cached,
+  onLoaded,
+  preferredCode,
+  onConfirmed,
+  onExpired,
+  onBack,
+}: Props) {
   const [data, setData] = useState<NearbyDealersResponse | null>(
     cached?.pincode === pincode ? cached : null,
   );
@@ -93,6 +103,7 @@ export function DealerStep({ pincode, cached, onLoaded, preferredCode, onConfirm
         onConfirmed(dealer);
         return;
       }
+      if (res.status === 401) return onExpired();
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
       setError(body?.message ?? 'We could not save your dealer. Please try again.');
     } catch {
@@ -237,20 +248,11 @@ function DealerCard({
               {dealer.address}
             </span>
           )}
-          {(dealer.distanceKm !== null || dealer.homeServiceable) && (
-            <span className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
-              {dealer.distanceKm !== null && (
-                <span className="inline-flex items-center gap-1 font-semibold text-amp-ink">
-                  <PinIcon className="size-3.5" />
-                  {formatDistance(dealer.distanceKm)}
-                </span>
-              )}
-              {dealer.homeServiceable && (
-                <span className="inline-flex items-center gap-1 font-medium text-amp-offer-ink">
-                  <HomeIcon className="size-3.5" />
-                  Home test rides
-                </span>
-              )}
+          {/* No "home test rides" badge: rides are at the showroom for now. */}
+          {dealer.distanceKm !== null && (
+            <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-amp-ink">
+              <PinIcon className="size-3.5" />
+              {formatDistance(dealer.distanceKm)}
             </span>
           )}
         </span>

@@ -1,4 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
+import { resolvePincode, type ResolvedDealer } from '@/lib/dealers/resolve';
+import { findNearbyDealers } from '@/lib/dealers/nearby';
 import { MODELS, type Colour } from '@/lib/catalog/catalog';
 import { availabilityAcross, STALE_AFTER_DAYS } from '@/lib/inventory/inventory';
 import { resolvePrice, toMoneyView, type MoneyView } from '@/lib/pricing/price';
@@ -69,6 +71,49 @@ export async function buildCatalog(
         describeModel(prisma, model.code, model.name, [...model.colours], regionCode, dealerCodes),
       ),
   );
+}
+
+export interface PincodeCatalog {
+  region: string | null;
+  dealer: ResolvedDealer | null;
+  models: ModelAvailability[];
+  /**
+   * A customer outside every region we cover can still be a lead and can
+   * still book a test ride; they just cannot be sold to online.
+   */
+  serviceable: boolean;
+}
+
+/**
+ * The catalog for one customer: priced in their region, stocked from the
+ * dealers within range of their pincode. What GET /api/catalog returns, and
+ * what a refreshed page is rendered with.
+ */
+export async function catalogForPincode(
+  prisma: PrismaClient,
+  pincode: string | null,
+): Promise<PincodeCatalog> {
+  let regionCode: string | null = null;
+  let dealer: ResolvedDealer | null = null;
+  let dealerCodes: string[] = [];
+
+  if (pincode) {
+    const location = await resolvePincode(prisma, pincode);
+    regionCode = location.regionCode;
+    dealer = location.dealer;
+
+    // Only dealers within the radius. Nothing further away can fulfil, so
+    // nothing further away may contribute stock.
+    const nearby = await findNearbyDealers(prisma, pincode);
+    dealerCodes = nearby.dealers.map((d) => d.code);
+  }
+
+  return {
+    region: regionCode,
+    dealer,
+    models: await buildCatalog(prisma, regionCode, dealerCodes),
+    serviceable: regionCode !== null,
+  };
 }
 
 async function describeModel(

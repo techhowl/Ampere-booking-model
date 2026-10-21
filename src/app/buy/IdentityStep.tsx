@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { isValidPhone, isValidPincode } from '@/lib/phone-format';
 import type { LeadCreatedResponse } from '@/lib/schemas/lead';
 import type { OtpRequestResponse } from '@/lib/schemas/otp';
@@ -22,31 +22,52 @@ import type { Prefill } from './prefill';
  * Consent sits directly under the phone field, two purposes, neither
  * pre-ticked. A customer who abandons before OTP never reaches a checkbox at
  * the bottom of a form.
+ *
+ * Also where a customer lands to verify AGAIN — after a refresh mid-OTP, or
+ * when their session timed out. The lead is already saved, so the fields show
+ * what we hold (the number only by its last four digits; the browser is never
+ * given the rest) and the button sends a fresh code.
  */
 
 interface Props {
   prefill: Prefill;
   attribution: Record<string, unknown>;
   lead: LeadCreatedResponse | null;
+  /** The name on a lead already saved, when picking it back up. */
+  initialName?: string;
+  /** Why they are here again, shown above the form. */
+  notice?: ReactNode;
   onSaved: (lead: LeadCreatedResponse, name: string) => void;
   onVerified: () => void;
   /** Unlock the fields again — a mistyped number must not be a dead end. */
   onEdit: () => void;
+  /** "Not you?" — forget this browser's lead entirely. */
+  onStartOver?: () => void;
 }
 
 type FieldErrors = Partial<
   Record<'name' | 'phone' | 'pincode' | 'consent.transactional', string>
 >;
 
-export function IdentityStep({ prefill, attribution, lead, onSaved, onVerified, onEdit }: Props) {
+export function IdentityStep({
+  prefill,
+  attribution,
+  lead,
+  initialName,
+  notice,
+  onSaved,
+  onVerified,
+  onEdit,
+  onStartOver,
+}: Props) {
   const nameId = useId();
   const phoneId = useId();
   const pincodeId = useId();
   const codeId = useId();
 
-  const [name, setName] = useState('');
+  const [name, setName] = useState(initialName ?? '');
   const [phone, setPhone] = useState('');
-  const [pincode, setPincode] = useState(prefill.pincode ?? '');
+  const [pincode, setPincode] = useState(lead?.pincode ?? prefill.pincode ?? '');
   const [transactional, setTransactional] = useState(false);
   const [marketing, setMarketing] = useState(false);
 
@@ -122,7 +143,10 @@ export function IdentityStep({ prefill, attribution, lead, onSaved, onVerified, 
         setCooldown(body.resendAfterSeconds ?? 60);
         // testCode only comes back on UAT, where no SMS provider exists yet.
         // Saying "TEST MODE" out loud matters: if this ever appeared on the
-        // live site it should be obvious to anyone, not just to us.
+        // live site it should be obvious to anyone, not just to us. It is
+        // filled in too, so a tester taps Verify — and still goes through the
+        // real verification, so what is tested is what ships.
+        if (body.testCode) setCode(body.testCode);
         setOtpNotice(
           body.testCode
             ? `TEST MODE — your code is ${body.testCode}`
@@ -244,6 +268,9 @@ export function IdentityStep({ prefill, attribution, lead, onSaved, onVerified, 
   /* ---------------------------------------------------------------- */
 
   const locked = !!lead;
+  // A saved lead with no code on its way yet: after a refresh, a timeout, or a
+  // code that died. The button asks for one.
+  const needsCode = !!lead && !otpRef;
 
   return (
     <div className="flex flex-col gap-7">
@@ -252,7 +279,18 @@ export function IdentityStep({ prefill, attribution, lead, onSaved, onVerified, 
         text="Enter your details to continue with your Ampere booking."
       />
 
-      <form onSubmit={lead ? verify : saveLead} noValidate className="flex flex-col gap-5">
+      {notice && <Notice>{notice}</Notice>}
+
+      <form
+        onSubmit={(event) => {
+          if (!lead) return void saveLead(event);
+          event.preventDefault();
+          if (needsCode) void sendCode();
+          else void verify(event);
+        }}
+        noValidate
+        className="flex flex-col gap-5"
+      >
         <Field label="Full name" htmlFor={nameId} error={errors.name}>
           <input
             id={nameId}
@@ -281,7 +319,9 @@ export function IdentityStep({ prefill, attribution, lead, onSaved, onVerified, 
               inputMode="numeric"
               autoComplete="tel-national"
               maxLength={14}
-              value={phone}
+              // A resumed lead's number is shown masked: the browser is only
+              // ever given its last four digits.
+              value={locked && !phone && lead ? `•••••• ${lead.phoneLast4}` : phone}
               onChange={(e) => setPhone(e.target.value.replace(/[^\d\s+]/g, ''))}
               placeholder="10-digit mobile number"
               disabled={locked}
@@ -341,10 +381,11 @@ export function IdentityStep({ prefill, attribution, lead, onSaved, onVerified, 
             <div className="flex items-start justify-between gap-3">
               <div>
                 <label htmlFor={codeId} className="text-[14px] font-semibold text-amp-ink">
-                  Enter verification code
+                  {needsCode ? 'Verify your number' : 'Enter verification code'}
                 </label>
                 <p className="mt-0.5 text-[13px] text-amp-muted">
-                  Sent by SMS to +91 ••••••{lead.phoneLast4}
+                  {needsCode ? 'We’ll text a 6-digit code to' : 'Sent by SMS to'} +91 ••••••
+                  {lead.phoneLast4}
                 </p>
               </div>
               <button
@@ -356,38 +397,45 @@ export function IdentityStep({ prefill, attribution, lead, onSaved, onVerified, 
               </button>
             </div>
 
-            <input
-              ref={codeInput}
-              id={codeId}
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-              placeholder="••••••"
-              className={`${inputClass(!!otpError)} text-center text-[22px] font-semibold tracking-[0.5em] placeholder:tracking-[0.5em]`}
-              aria-invalid={!!otpError}
-              aria-describedby={`${codeId}-status`}
-            />
+            {!needsCode && (
+              <input
+                ref={codeInput}
+                id={codeId}
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="••••••"
+                className={`${inputClass(!!otpError)} text-center text-[22px] font-semibold tracking-[0.5em] placeholder:tracking-[0.5em]`}
+                aria-invalid={!!otpError}
+                aria-describedby={`${codeId}-status`}
+              />
+            )}
 
-            <div id={`${codeId}-status`} className="flex items-center justify-between gap-3 text-[13px]">
-              {otpError ? (
-                <p role="alert" className="text-red-600">
-                  {otpError}
-                </p>
-              ) : (
-                <p className="text-amp-muted">{otpNotice ?? <>&nbsp;</>}</p>
-              )}
-              <button
-                type="button"
-                onClick={() => void sendCode()}
-                disabled={cooldown > 0 || busy}
-                className="shrink-0 cursor-pointer rounded-md px-1 font-semibold text-amp-accent-fill transition-colors hover:text-amp-accent-dark focus-visible:outline-2 focus-visible:outline-amp-accent disabled:cursor-not-allowed disabled:font-medium disabled:text-amp-muted"
-              >
-                {cooldown > 0 ? `Resend in ${formatCooldown(cooldown)}` : 'Resend OTP'}
-              </button>
-            </div>
+            {/* Nothing to say yet before a code is sent, so no empty line. */}
+            {(!needsCode || otpError || otpNotice) && (
+              <div id={`${codeId}-status`} className="flex items-center justify-between gap-3 text-[13px]">
+                {otpError ? (
+                  <p role="alert" className="text-red-600">
+                    {otpError}
+                  </p>
+                ) : (
+                  <p className="text-amp-muted">{otpNotice ?? <>&nbsp;</>}</p>
+                )}
+                {!needsCode && (
+                  <button
+                    type="button"
+                    onClick={() => void sendCode()}
+                    disabled={cooldown > 0 || busy}
+                    className="shrink-0 cursor-pointer rounded-md px-1 font-semibold text-amp-accent-fill transition-colors hover:text-amp-accent-dark focus-visible:outline-2 focus-visible:outline-amp-accent disabled:cursor-not-allowed disabled:font-medium disabled:text-amp-muted"
+                  >
+                    {cooldown > 0 ? `Resend in ${formatCooldown(cooldown)}` : 'Resend OTP'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -396,10 +444,14 @@ export function IdentityStep({ prefill, attribution, lead, onSaved, onVerified, 
         <StepActions>
           <PrimaryButton
             type="submit"
-            loading={submitting || (busy && !!lead && code.length === 6)}
-            disabled={busy || (!!lead && code.length !== 6)}
+            loading={submitting || (busy && !!lead && (needsCode || code.length === 6))}
+            disabled={busy || (!!lead && !needsCode && code.length !== 6) || (needsCode && cooldown > 0)}
           >
-            {lead ? 'Verify & Continue' : 'Send OTP'}
+            {!lead || needsCode
+              ? needsCode && cooldown > 0
+                ? `Send OTP in ${formatCooldown(cooldown)}`
+                : 'Send OTP'
+              : 'Verify & Continue'}
           </PrimaryButton>
         </StepActions>
 
@@ -409,6 +461,8 @@ export function IdentityStep({ prefill, attribution, lead, onSaved, onVerified, 
             Your details are saved. If the code doesn&apos;t arrive, we&apos;ll still call you.
           </p>
         )}
+
+        {onStartOver && <StartOver onClick={onStartOver} />}
       </form>
     </div>
   );
@@ -422,10 +476,12 @@ export function VerifiedDetails({
   name,
   lead,
   onContinue,
+  onStartOver,
 }: {
   name: string;
   lead: LeadCreatedResponse;
   onContinue: () => void;
+  onStartOver: () => void;
 }) {
   return (
     <div className="flex flex-col gap-7">
@@ -453,7 +509,28 @@ export function VerifiedDetails({
       <StepActions>
         <PrimaryButton onClick={onContinue}>Continue</PrimaryButton>
       </StepActions>
+
+      <StartOver onClick={onStartOver} />
     </div>
+  );
+}
+
+/**
+ * For a shared phone: the next person must not carry on with someone else's
+ * verified booking. Forgets this browser's lead and starts clean.
+ */
+function StartOver({ onClick }: { onClick: () => void }) {
+  return (
+    <p className="text-center text-[13px] text-amp-muted">
+      Not you?{' '}
+      <button
+        type="button"
+        onClick={onClick}
+        className="cursor-pointer rounded font-semibold text-amp-ink underline underline-offset-4 hover:text-amp-accent-fill focus-visible:outline-2 focus-visible:outline-amp-accent"
+      >
+        Start over
+      </button>
+    </p>
   );
 }
 

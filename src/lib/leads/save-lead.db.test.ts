@@ -224,6 +224,25 @@ describe('returning to a half-finished attempt', () => {
     expect(lead.phoneVerified).toBe(true);
   });
 
+  it('un-verifies the lead when the number changes', async () => {
+    // Otherwise: verify your own phone, swap in someone else's, book against
+    // it with no OTP.
+    const first = await saveLead(prisma, identity(), CONTEXT);
+    await prisma.lead.update({
+      where: { id: first.response.leadId },
+      data: { phoneVerified: true },
+    });
+
+    await saveLead(prisma, identity({ phone: '9123456780' }), {
+      ...CONTEXT,
+      existingLeadId: first.response.leadId,
+    });
+
+    const lead = await prisma.lead.findUniqueOrThrow({ where: { id: first.response.leadId } });
+    expect(lead.phoneVerified).toBe(false);
+    expect(lead.phoneLast4).toBe('6780');
+  });
+
   it('starts a fresh lead when the cookie points at a row that is gone', async () => {
     const { created } = await saveLead(prisma, identity(), {
       ...CONTEXT,

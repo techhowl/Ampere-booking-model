@@ -9,7 +9,7 @@ import {
   IdempotencyKeyReusedError,
   withIdempotency,
 } from '@/lib/idempotency/idempotency';
-import { SESSION_COOKIE, serialiseSession, parseSession, sessionCookieOptions } from '@/lib/crypto/session';
+import { readSession, writeSession } from '@/lib/http/session';
 
 /**
  * POST /api/leads — save name, phone and pincode, before OTP.
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const session = parseSession(request.cookies.get(SESSION_COOKIE)?.value);
+  const session = readSession(request);
   const context = {
     existingLeadId: session?.leadId ?? null,
     ip: clientIp(request),
@@ -72,14 +72,11 @@ export async function POST(request: NextRequest) {
     const response = NextResponse.json(body, { status: statusCode });
 
     // Carry the lead id forward so every later step patches this same record
-    // rather than starting a new one. Verification state is not changed here.
+    // rather than starting a new one. Saving step one again is a fresh
+    // attempt, so this browser's verification starts over too — the number may
+    // not be the one it proved.
     const leadId = (body as { leadId?: string }).leadId;
-    if (leadId) {
-      response.cookies.set(SESSION_COOKIE, serialiseSession({
-        leadId,
-        verified: session?.verified ?? false,
-      }), sessionCookieOptions);
-    }
+    if (leadId) writeSession(response, { leadId, verified: false });
 
     return response;
   } catch (error) {

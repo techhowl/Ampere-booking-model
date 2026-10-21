@@ -1,5 +1,7 @@
 import { notFound } from 'next/navigation';
+import { cookies } from 'next/headers';
 import { prisma } from '@/lib/db';
+import { SESSION_COOKIE, parseSession } from '@/lib/crypto/session';
 import { getModel } from '@/lib/catalog/catalog';
 import { formatRupees } from '@/lib/pricing/price';
 import { PAYMENT_TYPE_LABELS, type PaymentTypeCode } from '@/lib/schemas/order';
@@ -16,7 +18,10 @@ import { FakeCheckout } from './FakeCheckout';
  * details, and nothing ever will: Juspay is a hosted redirect flow and no card
  * data touches this codebase.
  *
- * It deletes itself from the journey the day the real redirect URL is used.
+ * It deletes itself from the journey the day the real redirect URL is used —
+ * and until then it is closed whenever the real client is on, and shows an
+ * order only to the browser that owns it. An order id travels in URLs; on its
+ * own it must not reveal what was bought, for how much, from whom.
  */
 
 export default async function FakePayPage({
@@ -26,11 +31,14 @@ export default async function FakePayPage({
 }) {
   const { orderId } = await params;
 
+  if (process.env.JUSPAY_ENABLED === 'true') notFound();
+
+  const session = parseSession((await cookies()).get(SESSION_COOKIE)?.value);
   const order = await prisma.order.findUnique({
     where: { orderId },
     include: { dealer: true },
   });
-  if (!order) notFound();
+  if (!order || !session || order.leadId !== session.leadId) notFound();
 
   const model = getModel(order.modelCode);
 

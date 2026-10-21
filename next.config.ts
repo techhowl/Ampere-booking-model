@@ -11,7 +11,8 @@ const nextConfig: NextConfig = {
    * carrying a full pnpm store, and the runtime stage needs no package manager
    * at all.
    */
-  output: 'standalone',
+  // Vercel (the UAT copy) builds its own way; VERCEL is set during its build.
+  output: process.env.VERCEL ? undefined : 'standalone',
 };
 
 export default nextConfig;

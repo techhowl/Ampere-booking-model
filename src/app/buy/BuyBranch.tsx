@@ -81,10 +81,12 @@ interface Props {
   model: ModelAvailability;
   colourCode: string | null;
   dealer: NearbyDealer | null;
+  /** The session timed out; the journey asks for the OTP again. */
+  onExpired: () => void;
   onBack: () => void;
 }
 
-export function BuyBranch({ model, colourCode, dealer, onBack }: Props) {
+export function BuyBranch({ model, colourCode, dealer, onExpired, onBack }: Props) {
   const price = model.price;
   const options = price
     ? OFFERED_PAYMENT_TYPES.map((id) => describe(id, price)).filter(
@@ -150,6 +152,7 @@ export function BuyBranch({ model, colourCode, dealer, onBack }: Props) {
         return;
       }
 
+      if (res.status === 401) return onExpired();
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
       setError(body?.message ?? 'We could not start your payment. Please try again.');
       setSubmitting(false);

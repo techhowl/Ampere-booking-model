@@ -1,8 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
-import { buildCatalog } from '@/lib/catalog/availability';
-import { resolvePincode } from '@/lib/dealers/resolve';
-import { findNearbyDealers } from '@/lib/dealers/nearby';
+import { catalogForPincode } from '@/lib/catalog/availability';
 import { isValidPincode } from '@/lib/phone-format';
 
 /**
@@ -25,38 +23,14 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const pincode = request.nextUrl.searchParams.get('pincode')?.trim() ?? '';
 
-  let regionCode: string | null = null;
-  let dealer = null;
-  let dealerCodes: string[] = [];
-
-  if (pincode) {
-    if (!isValidPincode(pincode)) {
-      return NextResponse.json(
-        { error: 'invalid_pincode', message: 'Enter a valid 6-digit pincode' },
-        { status: 400 },
-      );
-    }
-    const location = await resolvePincode(prisma, pincode);
-    regionCode = location.regionCode;
-    dealer = location.dealer;
-
-    // Only dealers within the radius. Nothing further away can fulfil, so
-    // nothing further away may contribute stock.
-    const nearby = await findNearbyDealers(prisma, pincode);
-    dealerCodes = nearby.dealers.map((d) => d.code);
+  if (pincode && !isValidPincode(pincode)) {
+    return NextResponse.json(
+      { error: 'invalid_pincode', message: 'Enter a valid 6-digit pincode' },
+      { status: 400 },
+    );
   }
 
-  const models = await buildCatalog(prisma, regionCode, dealerCodes);
+  const catalog = await catalogForPincode(prisma, pincode || null);
 
-  return NextResponse.json(
-    {
-      region: regionCode,
-      dealer,
-      models,
-      // A customer outside every region we cover can still be a lead and can
-      // still book a test ride; they just cannot be sold to online.
-      serviceable: regionCode !== null,
-    },
-    { headers: { 'Cache-Control': 'no-store' } },
-  );
+  return NextResponse.json(catalog, { headers: { 'Cache-Control': 'no-store' } });
 }

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
-import { SESSION_COOKIE, parseSession } from '@/lib/crypto/session';
+import { requireJourney, writeSession } from '@/lib/http/session';
 import { createOrderSchema } from '@/lib/schemas/order';
 import { createOrder, OrderError } from '@/lib/orders/create-order';
 import { getJuspayClient } from '@/lib/juspay/client';
@@ -23,13 +23,10 @@ export const dynamic = 'force-dynamic';
 const ROUTE = 'POST /api/orders';
 
 export async function POST(request: NextRequest) {
-  const session = parseSession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) {
-    return NextResponse.json(
-      { error: 'no_lead', message: 'Enter your details before paying.' },
-      { status: 409 },
-    );
-  }
+  // A live, verified journey — see lib/http/session.ts.
+  const gate = requireJourney(request);
+  if (!gate.ok) return gate.response;
+  const { session } = gate;
 
   let raw: unknown;
   try {
@@ -72,7 +69,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(body, { status: statusCode });
+    return writeSession(NextResponse.json(body, { status: statusCode }), session);
   } catch (error) {
     if (error instanceof IdempotencyKeyReusedError) {
       return NextResponse.json({ error: 'idempotency_key_reused' }, { status: 422 });

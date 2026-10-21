@@ -96,6 +96,16 @@ export const env = {
     return process.env.OTP_ECHO_ENABLED === 'true';
   },
 
+  /**
+   * How long a journey survives without activity. Within it a refresh resumes
+   * where the customer was; after it they verify their number again. Not the
+   * cookie's lifetime — that stays seven days, for lead continuity.
+   */
+  get sessionIdleSeconds(): number {
+    const minutes = Number(process.env.SESSION_IDLE_MINUTES ?? 60);
+    return Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes * 60) : 3600;
+  },
+
   /** Turnstile is inert until keys arrive; see the OTP route. */
   get turnstileSecret(): string | null {
     return process.env.TURNSTILE_SECRET || null;

@@ -1,11 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
-import {
-  SESSION_COOKIE,
-  parseSession,
-  serialiseSession,
-  sessionCookieOptions,
-} from '@/lib/crypto/session';
+import { readSession, writeSession } from '@/lib/http/session';
 import { otpVerifySchema } from '@/lib/schemas/otp';
 import { verifyOtp } from '@/lib/otp/otp';
 
@@ -31,7 +26,9 @@ const MESSAGES: Record<string, string> = {
 };
 
 export async function POST(request: NextRequest) {
-  const session = parseSession(request.cookies.get(SESSION_COOKIE)?.value);
+  // Deliberately not requireJourney(): verifying is how an expired journey
+  // starts again.
+  const session = readSession(request);
   if (!session) {
     return NextResponse.json(
       { error: 'no_lead', message: 'Enter your details before verifying.' },
@@ -89,13 +86,10 @@ export async function POST(request: NextRequest) {
       data: { phoneVerified: true },
     });
 
-    const response = NextResponse.json({ verified: true }, { status: 200 });
-    response.cookies.set(
-      SESSION_COOKIE,
-      serialiseSession({ leadId: lead.id, verified: true }),
-      sessionCookieOptions,
-    );
-    return response;
+    return writeSession(NextResponse.json({ verified: true }, { status: 200 }), {
+      leadId: lead.id,
+      verified: true,
+    });
   } catch (error) {
     console.error('[POST /api/otp/verify] failed', {
       name: error instanceof Error ? error.name : 'unknown',

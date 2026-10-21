@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FAMILIES, type Model } from '@/lib/catalog/catalog';
 import type { NearbyDealer } from '@/lib/schemas/dealer';
 import { ProductImage } from '@/components/ProductImage';
@@ -28,13 +29,6 @@ interface Props {
 
 export function ProductPanel({ model, colourCode, preview, onColourChange }: Props) {
   const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    if (!expanded) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setExpanded(false);
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [expanded]);
 
   const index = Math.max(
     0,
@@ -108,29 +102,172 @@ export function ProductPanel({ model, colourCode, preview, onColourChange }: Pro
       </div>
 
       {expanded && (
-        <div
-          role="dialog"
-          aria-modal
-          aria-label={`${model.name}, larger view`}
-          onClick={() => setExpanded(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-amp-ink/90 p-6"
-        >
-          <ProductImage
-            model={model}
-            colourCode={colourCode}
-            className="max-h-full w-full max-w-4xl object-contain"
-          />
+        <Lightbox
+          model={model}
+          colourCode={colour?.code ?? null}
+          family={preview ? null : (family ?? null)}
+          onColourChange={canPage ? onColourChange : undefined}
+          onClose={() => setExpanded(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The larger view.
+ *
+ * Portalled to <body>. Rendered in place it sat inside the sticky column, and
+ * a sticky element is its own stacking context — so the form beside it and the
+ * header painted over a "full-screen" overlay. At the top of the document
+ * nothing can.
+ *
+ * A white card rather than a dark backdrop: the photography is shot for a
+ * light background, and a Carbon Knight scooter on near-black disappears.
+ */
+function Lightbox({
+  model,
+  colourCode,
+  family,
+  onColourChange,
+  onClose,
+}: {
+  model: Model;
+  colourCode: string | null;
+  family: string | null;
+  onColourChange?: (colourCode: string) => void;
+  onClose: () => void;
+}) {
+  const titleId = useId();
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const colours = model.colours;
+  const index = Math.max(0, colours.findIndex((c) => c.code === colourCode));
+  const colour = colours[index];
+
+  const step = (delta: number) => {
+    const next = colours[(index + delta + colours.length) % colours.length];
+    if (next) onColourChange?.(next.code);
+  };
+  // The latest step(), for the key handler registered once below.
+  const stepRef = useRef(step);
+  useEffect(() => {
+    stepRef.current = step;
+  });
+
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeButton.current?.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowLeft') stepRef.current(-1);
+      else if (e.key === 'ArrowRight') stepRef.current(1);
+    };
+    window.addEventListener('keydown', onKey);
+
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = overflow;
+      opener?.focus();
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      className="fixed inset-0 z-100 flex items-center justify-center p-3 sm:p-8"
+    >
+      <div
+        aria-hidden
+        onClick={onClose}
+        className="amp-fade absolute inset-0 bg-amp-ink/70 backdrop-blur-sm"
+      />
+
+      <div className="amp-rise relative flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-[0_40px_80px_-30px_rgba(4,9,16,0.6)]">
+        <header className="flex items-start justify-between gap-4 px-5 pt-5 sm:px-8 sm:pt-7">
+          <div>
+            {family && (
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amp-muted">
+                {family}
+              </p>
+            )}
+            <h2
+              id={titleId}
+              className="mt-0.5 text-[22px] font-bold leading-tight tracking-tight text-amp-ink sm:text-[30px]"
+            >
+              {model.name}
+            </h2>
+          </div>
           <button
+            ref={closeButton}
             type="button"
-            onClick={() => setExpanded(false)}
-            aria-label="Close"
-            className="absolute right-5 top-5 flex size-10 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+            onClick={onClose}
+            aria-label="Close larger view"
+            className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-amp-page text-amp-ink transition-colors hover:bg-amp-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amp-accent"
           >
             <CloseIcon className="size-5" />
           </button>
+        </header>
+
+        <div className="relative h-[min(58vh,560px)] min-h-56 shrink">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-3/5 bg-[radial-gradient(60%_55%_at_50%_85%,var(--color-amp-accent-tint),transparent)]"
+          />
+          <div key={colour?.code} className="amp-fade absolute inset-0">
+            <ProductImage
+              model={model}
+              colourCode={colour?.code ?? null}
+              className="h-full w-full object-contain px-6 py-4 sm:px-16 sm:py-8"
+            />
+          </div>
+          {onColourChange && colours.length > 1 && (
+            <>
+              <CarouselButton side="left" onClick={() => step(-1)} />
+              <CarouselButton side="right" onClick={() => step(1)} />
+            </>
+          )}
         </div>
-      )}
-    </>
+
+        <footer className="flex flex-wrap items-center justify-center gap-x-1 gap-y-2 border-t border-amp-line/70 px-4 py-4">
+          {onColourChange ? (
+            colours.map((c) => {
+              const selected = c.code === colour?.code;
+              return (
+                <button
+                  key={c.code}
+                  type="button"
+                  onClick={() => onColourChange(c.code)}
+                  aria-pressed={selected}
+                  className={[
+                    'inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-full px-3 text-[13px] transition-colors',
+                    'focus-visible:outline-2 focus-visible:outline-amp-accent',
+                    selected ? 'bg-amp-page font-semibold text-amp-ink' : 'text-amp-muted hover:text-amp-ink',
+                  ].join(' ')}
+                >
+                  <span
+                    aria-hidden
+                    className={[
+                      'size-4 rounded-full border border-black/10',
+                      selected ? 'ring-2 ring-amp-ink ring-offset-2' : '',
+                    ].join(' ')}
+                    style={{ backgroundColor: c.hex }}
+                  />
+                  {c.name}
+                </button>
+              );
+            })
+          ) : (
+            <p className="text-[13px] font-semibold text-amp-ink">{colour?.name}</p>
+          )}
+        </footer>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

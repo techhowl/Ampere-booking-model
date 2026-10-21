@@ -45,6 +45,10 @@ export interface StatusOutcome {
   source: 'webhook' | 'status_api' | 'none';
   amountCharged: string;
   amountPaid: string | null;
+  /** The on-road price. */
+  amountTotal: string;
+  /** What is left to pay at the dealer after a partial payment; null otherwise. */
+  balanceDue: string | null;
   paymentType: string;
   modelCode: string;
   colourCode: string | null;
@@ -141,6 +145,11 @@ export async function resolveForReturn(
     source: resolution.source,
     amountCharged: fresh.amountCharged.toFixed(2),
     amountPaid: fresh.amountPaid?.toFixed(2) ?? null,
+    amountTotal: fresh.amountTotal.toFixed(2),
+    balanceDue:
+      fresh.paymentType === 'partial'
+        ? fresh.amountTotal.minus(fresh.amountCharged).toFixed(2)
+        : null,
     paymentType: fresh.paymentType,
     modelCode: fresh.modelCode,
     colourCode: fresh.colourCode,

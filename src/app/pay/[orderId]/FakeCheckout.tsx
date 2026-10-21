@@ -47,8 +47,12 @@ export function FakeCheckout({ orderId }: { orderId: string }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // The fake client accepts this and rejects everything else.
-          'x-juspay-signature': 'valid-signature',
+          // Where the webhook route reads it — Juspay authenticates webhooks
+          // with this header. The fake client accepts this value and nothing
+          // else. (It was sent as x-juspay-signature, which the route never
+          // reads, so every "Payment fails" was ignored and then resolved as
+          // paid by the status API.)
+          Authorization: 'valid-signature',
         },
         body: JSON.stringify({
           event_name: 'ORDER_SUCCEEDED',
