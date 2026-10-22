@@ -11,9 +11,10 @@
  * and are resolved server-side at request time. A price in this file would be a
  * second source of truth for money, which is exactly the thing the spec forbids.
  *
- * The line-up is the five named in the purchase journey document, section 01.
- * Specs and colours are PLACEHOLDER and need confirming against Ampere's
- * published figures. Region membership is open item #2 (Sales).
+ * The line-up and colours follow ampere-electric.com: four models, each with
+ * the colours, names and hex values on its own page there. Specs are
+ * PLACEHOLDER and need confirming against Ampere's published figures. Region
+ * membership is open item #2 (Sales).
  */
 
 export interface Colour {
@@ -21,6 +22,11 @@ export interface Colour {
   name: string;
   /** Swatch shown in the picker. */
   hex: string;
+  /**
+   * The second tone of a two-tone paint. Its swatch is split diagonally, as on
+   * ampere-electric.com — see swatchBackground().
+   */
+  hex2?: string;
 }
 
 /**
@@ -38,7 +44,7 @@ export interface ModelSpecs {
 
 /**
  * The design groups models under a family tab (NEXUS / MAGNUS / REO) and lists
- * the variants beneath it. Three families, five variants.
+ * the variants beneath it. Three families, four variants.
  */
 export const FAMILIES = [
   { code: 'nexus', name: 'Nexus' },
@@ -106,31 +112,55 @@ export const REGIONS: readonly Region[] = [
 ] as const;
 
 /* ------------------------------------------------------------------ */
-/* Models — the five from the purchase journey document                */
+/* Models — the line-up on ampere-electric.com                        */
 /* ------------------------------------------------------------------ */
 
 /*
- * Colours are per model, because they are: the Reo VYB does not come in
- * Matcha Green. Names are taken from each model's own page on
- * ampere-electric.com; hex values are read off Ampere's photography, so a
- * swatch matches the scooter the customer is looking at.
+ * Colours are per model, because they are. Names, order and hex values are
+ * exactly those in each model's colour data on ampere-electric.com
+ * (/nexus-ex-plus, /gmax, /magnus-neo, /reovyb), so a swatch here is the
+ * swatch the customer just saw there. When the main site changes a colour,
+ * change it here to match.
  */
 
-const CARBON_KNIGHT: Colour = { code: 'carbon-knight', name: 'Carbon Knight', hex: '#2E2E30' };
-const STEEL_GREY: Colour = { code: 'steel-grey', name: 'Steel Grey', hex: '#3E5457' };
+const CARBON_KNIGHT: Colour = { code: 'carbon-knight', name: 'Carbon Knight', hex: '#767876' };
+const STEEL_GREY: Colour = { code: 'steel-grey', name: 'Steel Grey', hex: '#839FAB' };
 
-const MATCHA_GREEN: Colour = { code: 'matcha-green', name: 'Matcha Green', hex: '#7FB89C' };
-const MONSOON_BLUE: Colour = { code: 'monsoon-blue', name: 'Monsoon Blue', hex: '#4A7A96' };
-const CINNAMON_COPPER: Colour = { code: 'cinnamon-copper', name: 'Cinnamon Copper', hex: '#A8614A' };
+const MATCHA_GREEN: Colour = {
+  code: 'matcha-green',
+  name: 'Matcha Green',
+  hex: '#628C69',
+  hex2: '#EAE9D5',
+};
+const CINNAMON_COPPER: Colour = {
+  code: 'cinnamon-copper',
+  name: 'Cinnamon Copper',
+  hex: '#83483E',
+  hex2: '#EAE9D5',
+};
 
-const MISTY_MAUVE: Colour = { code: 'misty-mauve', name: 'Misty Mauve', hex: '#B9A6AC' };
-const OCEAN_BLUE: Colour = { code: 'ocean-blue', name: 'Ocean Blue', hex: '#1E3A6E' };
-const BUTTER_YELLOW: Colour = { code: 'butter-yellow', name: 'Butter Yellow', hex: '#E3C765' };
+const OCEAN_BLUE: Colour = { code: 'ocean-blue', name: 'Ocean Blue', hex: '#082A5A', hex2: '#156DCF' };
+const TURMERIC_LATTE: Colour = {
+  code: 'turmeric-latte',
+  name: 'Turmeric Latte',
+  hex: '#E7CC7C',
+  hex2: '#EAE9D5',
+};
+const MISTY_MAUVE: Colour = { code: 'misty-mauve', name: 'Misty Mauve', hex: '#BBA9B5', hex2: '#8F8A9F' };
 
-const TEAL: Colour = { code: 'teal', name: 'Teal', hex: '#20A0A8' };
-const PASTEL_PURPLE: Colour = { code: 'pastel-purple', name: 'Pastel Purple', hex: '#9B7BC4' };
-const VYB_WHITE: Colour = { code: 'white', name: 'White', hex: '#E8E8EA' };
-const VYB_BLACK: Colour = { code: 'black', name: 'Black', hex: '#6A6A6C' };
+const PASTEL_PURPLE: Colour = { code: 'pastel-purple', name: 'Pastel Purple', hex: '#AD8DBC' };
+const AQUA_METALLIC: Colour = { code: 'aqua-metallic', name: 'Aqua Metallic', hex: '#009FAA' };
+const DARK_GREY: Colour = { code: 'dark-grey', name: 'Dark Grey', hex: '#131313' };
+
+/**
+ * A swatch's CSS background. Two-tone paints are split diagonally, half and
+ * half, exactly as the main site draws them.
+ */
+export function swatchBackground(colour: Pick<Colour, 'hex' | 'hex2'>): string {
+  return colour.hex2
+    ? `linear-gradient(135deg, ${colour.hex} 0 50%, ${colour.hex2} 50% 100%)`
+    : colour.hex;
+}
 
 /**
  * Prices here are the published ex-showroom figures from each model page, used
@@ -149,25 +179,11 @@ export const MODELS: readonly Model[] = [
     aliases: ['nexus'],
   },
   {
-    // "New Magnus GMax (with Intellipack)" on the site. No photography
-    // supplied yet, so it falls back to the placeholder silhouette.
-    code: 'magnus-gmax-iot',
-    family: 'magnus',
-    name: 'New Magnus GMax',
-    sort: 2,
-    colours: [MATCHA_GREEN],
-    specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: 5.45 },
-    image: 'magnus-gmax-iot',
-    // Its page on the main site is still in draft. Add the slug here when it
-    // is published.
-    aliases: [],
-  },
-  {
     code: 'magnus-gmax',
     family: 'magnus',
     name: 'Magnus GMax',
-    sort: 3,
-    colours: [MATCHA_GREEN, MONSOON_BLUE, CINNAMON_COPPER],
+    sort: 2,
+    colours: [MATCHA_GREEN, CINNAMON_COPPER],
     specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: 5.45 },
     image: 'magnus-gmax',
     // ampere-electric.com/gmax
@@ -177,8 +193,8 @@ export const MODELS: readonly Model[] = [
     code: 'magnus-neo',
     family: 'magnus',
     name: 'Magnus Neo',
-    sort: 4,
-    colours: [OCEAN_BLUE, MISTY_MAUVE, BUTTER_YELLOW, MATCHA_GREEN],
+    sort: 3,
+    colours: [OCEAN_BLUE, TURMERIC_LATTE, MISTY_MAUVE],
     specs: { rangeKm: 125, topSpeedKmph: 60, chargeHours: 5 },
     image: 'magnus-neo',
     aliases: [],
@@ -187,8 +203,8 @@ export const MODELS: readonly Model[] = [
     code: 'reo-vyb',
     family: 'reo',
     name: 'Reo VYB',
-    sort: 5,
-    colours: [TEAL, PASTEL_PURPLE, VYB_WHITE, VYB_BLACK],
+    sort: 4,
+    colours: [PASTEL_PURPLE, AQUA_METALLIC, DARK_GREY],
     specs: { rangeKm: 80, topSpeedKmph: 25, chargeHours: 4 },
     image: 'reo-vyb',
     // ampere-electric.com/reovyb

@@ -99,7 +99,7 @@ The code prints in your `pnpm dev` terminal:
 
 | # | Do this | Expect |
 |---|---|---|
-| 4.1 | Click **MAGNUS** | Three variants: New Magnus GMax, Magnus GMax, Magnus Neo |
+| 4.1 | Click **MAGNUS** | Two variants: Magnus GMax, Magnus Neo |
 | 4.2 | Click a variant | Card outlines dark; price, EMI line, three specs and the green offers strip |
 | 4.3 | Click a colour swatch | The scooter on the left changes |
 | 4.4 | Click the carousel arrows | Steps through colours — same as the swatches |

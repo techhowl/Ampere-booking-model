@@ -25,4 +25,4 @@ Unoptimised originals are kept outside the build at `assets/models-source/`.
 
 ## Currently missing
 
-`magnus-g-max-nxg-io` has no photography, so it renders the placeholder.
+Nothing — every model and colour in the catalog has a photograph.

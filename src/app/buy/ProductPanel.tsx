@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FAMILIES, type Model } from '@/lib/catalog/catalog';
+import { FAMILIES, swatchBackground, type Model } from '@/lib/catalog/catalog';
 import type { NearbyDealer } from '@/lib/schemas/dealer';
 import { ProductImage } from '@/components/ProductImage';
 import { CloseIcon, ExpandIcon } from '@/components/Brand';
@@ -78,7 +78,7 @@ export function ProductPanel({ model, colourCode, preview, onColourChange }: Pro
             <span
               aria-hidden
               className="size-4 rounded-full border border-black/10"
-              style={{ backgroundColor: colour.hex }}
+              style={{ background: swatchBackground(colour) }}
             />
             {colour.name}
           </p>
@@ -255,7 +255,7 @@ function Lightbox({
                       'size-4 rounded-full border border-black/10',
                       selected ? 'ring-2 ring-amp-ink ring-offset-2' : '',
                     ].join(' ')}
-                    style={{ backgroundColor: c.hex }}
+                    style={{ background: swatchBackground(c) }}
                   />
                   {c.name}
                 </button>
