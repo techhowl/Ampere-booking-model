@@ -9,7 +9,7 @@ import { displayPhone } from '@/lib/phone-format';
 import { SUPPORT_PHONE } from '@/lib/contact';
 import type { OfferedDay } from '@/lib/test-rides/slots';
 import { FOCUS, Notice, Pill, PrimaryButton, Skeleton } from '@/components/ui';
-import { CheckIcon, PhoneIcon, StoreIcon } from '@/components/Brand';
+import { CheckIcon, DocumentIcon, DownloadIcon, PhoneIcon, StoreIcon } from '@/components/Brand';
 import { StepActions, StepHeader } from './StepFrame';
 
 /**
@@ -82,27 +82,12 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
   const wantsFinancing = topics.includes('financing');
 
   function toggleTopic(topic: HelpTopic) {
-    const on = !topics.includes(topic);
-    setTopics((current) => (on ? [...current, topic] : current.filter((t) => t !== topic)));
-    // Asking for the brochure hands it over there and then, rather than
-    // promising to send it. Ours download; a main-site leaflet opens in a tab.
-    if (topic === 'brochure' && on) downloadBrochure();
+    setTopics((current) =>
+      current.includes(topic) ? current.filter((t) => t !== topic) : [...current, topic],
+    );
   }
 
-  function downloadBrochure() {
-    const url = getModel(model.code)?.brochureUrl;
-    if (!url) return;
-    if (url.startsWith('/')) {
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = url.slice(url.lastIndexOf('/') + 1);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } else {
-      window.open(url, '_blank', 'noopener');
-    }
-  }
+  const brochureUrl = getModel(model.code)?.brochureUrl ?? null;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -275,6 +260,33 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
         Picking Financing does something, rather than filing the signal away —
         but what it does is set an expectation, not quote a rate.
       */}
+      {/*
+        Choosing Brochure offers the download rather than starting it: a file
+        arriving unasked on a phone is easy to miss and easy to resent. Ours
+        download; the main site's leaflet opens in a new tab.
+      */}
+      {topics.includes('brochure') && brochureUrl && (
+        <div className="amp-rise flex items-center gap-3.5 rounded-2xl border border-amp-line bg-white p-3.5">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amp-page text-amp-ink">
+            <DocumentIcon className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[14px] font-semibold text-amp-ink">{model.name} brochure</p>
+            <p className="text-[12px] text-amp-muted">PDF</p>
+          </div>
+          <a
+            href={brochureUrl}
+            {...(brochureUrl.startsWith('/')
+              ? { download: brochureUrl.slice(brochureUrl.lastIndexOf('/') + 1) }
+              : { target: '_blank', rel: 'noopener noreferrer' })}
+            className={`inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-amp-cta px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amp-cta-hover ${FOCUS}`}
+          >
+            <DownloadIcon className="size-4" />
+            Download
+          </a>
+        </div>
+      )}
+
       {wantsFinancing && (
         <Notice className="amp-rise">
           We&apos;ll have someone go through the finance options with you on the day — plans,
