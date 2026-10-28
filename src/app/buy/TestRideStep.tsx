@@ -95,7 +95,7 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
     if (url.startsWith('/')) {
       const link = document.createElement('a');
       link.href = url;
-      link.download = `Ampere ${model.name} brochure.pdf`;
+      link.download = url.slice(url.lastIndexOf('/') + 1);
       document.body.appendChild(link);
       link.click();
       link.remove();

@@ -81,7 +81,11 @@ export interface Model {
   variant: { group: string; groupName: string; label: string };
   /** Its page on ampere-electric.com. */
   pageUrl: string;
-  /** What "Brochure" downloads: ours under /brochures, or the main site's leaflet. */
+  /**
+   * What "Brochure" downloads: ours under /brochures, or the main site's
+   * leaflet. Ours are named as the customer should see them saved — Vercel
+   * sends the file's own name with it, and browsers prefer that to ours.
+   */
   brochureUrl: string;
   /** The offers strip on its card. PLACEHOLDER until Marketing sends one per scooter. */
   offer: string;
@@ -210,7 +214,7 @@ export const MODELS: readonly Model[] = [
     angles: { 'carbon-knight': 8, 'steel-grey': 8 },
     variant: { group: 'nexus-ex-plus', groupName: 'Nexus EX+', label: 'Standard' },
     pageUrl: `${MAIN_SITE}/nexus-ex-plus`,
-    brochureUrl: '/brochures/nexus-ex-plus.pdf',
+    brochureUrl: '/brochures/ampere-nexus-ex-plus-brochure.pdf',
     offer: PLACEHOLDER_OFFER,
     aliases: ['nexus'],
   },
@@ -226,7 +230,7 @@ export const MODELS: readonly Model[] = [
     angles: { 'carbon-knight': 8, 'steel-grey': 8 },
     variant: { group: 'nexus-ex-plus', groupName: 'Nexus EX+', label: 'Intellipack' },
     pageUrl: `${MAIN_SITE}/nexus-ex-plus-intellipack`,
-    brochureUrl: '/brochures/nexus-ex-plus.pdf',
+    brochureUrl: '/brochures/ampere-nexus-ex-plus-brochure.pdf',
     offer: PLACEHOLDER_OFFER,
     aliases: [],
   },
@@ -241,7 +245,7 @@ export const MODELS: readonly Model[] = [
     angles: { 'matcha-green': 4, 'cinnamon-copper': 8 },
     variant: { group: 'magnus-gmax', groupName: 'Magnus GMax', label: 'Standard' },
     pageUrl: `${MAIN_SITE}/gmax`,
-    brochureUrl: '/brochures/magnus-gmax.pdf',
+    brochureUrl: '/brochures/ampere-magnus-gmax-brochure.pdf',
     offer: PLACEHOLDER_OFFER,
     // ampere-electric.com/gmax
     aliases: ['gmax'],
@@ -257,7 +261,7 @@ export const MODELS: readonly Model[] = [
     angles: { 'matcha-green': 7, 'monsoon-blue': 7, 'cinnamon-copper': 8 },
     variant: { group: 'magnus-gmax', groupName: 'Magnus GMax', label: 'Intellipack' },
     pageUrl: `${MAIN_SITE}/new-magnus-gmax-iot`,
-    brochureUrl: '/brochures/magnus-gmax.pdf',
+    brochureUrl: '/brochures/ampere-magnus-gmax-brochure.pdf',
     offer: PLACEHOLDER_OFFER,
     // ampere-electric.com/new-magnus-gmax-iot
     aliases: ['new-magnus-gmax-iot', 'magnus-gmax-iot'],
@@ -273,7 +277,7 @@ export const MODELS: readonly Model[] = [
     angles: { 'ocean-blue': 5, 'turmeric-latte': 5, 'misty-mauve': 5 },
     variant: { group: 'magnus-neo', groupName: 'Magnus Neo', label: 'Standard' },
     pageUrl: `${MAIN_SITE}/magnus-neo`,
-    brochureUrl: '/brochures/magnus-neo.pdf',
+    brochureUrl: '/brochures/ampere-magnus-neo-brochure.pdf',
     offer: PLACEHOLDER_OFFER,
     aliases: [],
   },
