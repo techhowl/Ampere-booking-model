@@ -45,10 +45,10 @@ describe('the rolling window', () => {
       expect(day.windows.map((w) => w.code)).toEqual(['w1', 'w2', 'w3', 'w4']);
     }
     expect(SLOT_WINDOWS.map((w) => w.label)).toEqual([
-      '10:00 – 12:00',
-      '13:00 – 15:00',
-      '15:00 – 17:00',
-      '17:00 – 20:00',
+      '10:00 AM – 12:00 PM',
+      '1:00 PM – 3:00 PM',
+      '3:00 PM – 5:00 PM',
+      '5:00 PM – 8:00 PM',
     ]);
   });
 });
@@ -177,11 +177,11 @@ describe('parseSlotDate', () => {
 describe('describeSlot', () => {
   it('reads the way a confirmation should', () => {
     const date = parseSlotDate('2026-10-06') as Date;
-    expect(describeSlot(date, 'w2', MORNING)).toBe('Tomorrow, 13:00 – 15:00');
+    expect(describeSlot(date, 'w2', MORNING)).toBe('Tomorrow, 1:00 PM – 3:00 PM');
   });
 
   it('names a distant day', () => {
     const date = parseSlotDate('2026-10-09') as Date;
-    expect(describeSlot(date, 'w4', MORNING)).toBe('Fri 9 Oct, 17:00 – 20:00');
+    expect(describeSlot(date, 'w4', MORNING)).toBe('Fri 9 Oct, 5:00 PM – 8:00 PM');
   });
 });

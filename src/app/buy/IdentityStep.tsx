@@ -46,7 +46,7 @@ interface Props {
 }
 
 type FieldErrors = Partial<
-  Record<'name' | 'phone' | 'pincode' | 'consent.transactional', string>
+  Record<'name' | 'phone' | 'pincode', string>
 >;
 
 export function IdentityStep({
@@ -68,7 +68,6 @@ export function IdentityStep({
   const [name, setName] = useState(initialName ?? '');
   const [phone, setPhone] = useState('');
   const [pincode, setPincode] = useState(lead?.pincode ?? prefill.pincode ?? '');
-  const [transactional, setTransactional] = useState(false);
   const [marketing, setMarketing] = useState(false);
 
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -171,9 +170,6 @@ export function IdentityStep({
     if (name.trim().length < 2) found.name = 'Please enter your full name';
     if (!isValidPhone(phone)) found.phone = 'Enter a valid 10-digit mobile number';
     if (!isValidPincode(pincode)) found.pincode = 'Enter a valid 6-digit pincode';
-    if (!transactional) {
-      found['consent.transactional'] = 'We need your permission to contact you';
-    }
     setErrors(found);
     if (Object.keys(found).length > 0) return;
 
@@ -332,27 +328,22 @@ export function IdentityStep({
         </Field>
 
         {/* Consent, at step one, under the phone field. Two purposes,
-            recorded independently. Neither pre-ticked. */}
+            recorded independently. Being contacted about the enquiry is the
+            point of the form, so it is a notice the customer agrees to by
+            pressing Send OTP — said plainly, here, before they press it — and
+            recorded with its version like the marketing one. Marketing stays
+            a box nobody has ticked for them. */}
         {!locked && (
-          <fieldset className="-mt-1 flex flex-col gap-1 rounded-xl bg-amp-page/70 px-3.5 py-2.5">
+          <fieldset className="-mt-1 flex flex-col gap-1.5 rounded-xl bg-amp-page/70 px-3.5 py-2.5">
             <legend className="sr-only">How we may contact you</legend>
-            <Checkbox
-              checked={transactional}
-              onChange={setTransactional}
-              invalid={!!errors['consent.transactional']}
-            >
-              Ampere may contact me about this enquiry.{' '}
-              <span className="text-amp-muted">Required</span>
-            </Checkbox>
+            <p className="text-[12px] leading-relaxed text-amp-muted">
+              By continuing, you agree that Ampere and its dealers may contact you about this
+              enquiry.
+            </p>
             <Checkbox checked={marketing} onChange={setMarketing}>
               Send me offers and product news.{' '}
               <span className="text-amp-muted">Optional</span>
             </Checkbox>
-            {errors['consent.transactional'] && (
-              <p role="alert" className="text-[13px] text-red-600">
-                {errors['consent.transactional']}
-              </p>
-            )}
           </fieldset>
         )}
 

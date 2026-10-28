@@ -207,6 +207,8 @@ const BASE_PRICE: Record<string, number> = {
   // Uniform across states on the site today; price_book still keys on region so
   // Finance can vary them later without a code change.
   'nexus-ex-plus': 129999,
+  'nexus-ex-plus-intellipack': 135999,
+  'magnus-gmax-intellipack': 109999,
   'magnus-gmax': 102999,
   'magnus-neo': 90999,
   'reo-vyb': 71999,

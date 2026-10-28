@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { formatPhoneForDisplay } from '@/lib/phone-format';
+import { displayPhone } from '@/lib/phone-format';
 import type { NearbyDealer, NearbyDealersResponse } from '@/lib/schemas/dealer';
 import { Notice, PrimaryButton, SelectionDot, Skeleton } from '@/components/ui';
 import { PhoneIcon, PinIcon, StoreIcon } from '@/components/Brand';
@@ -260,19 +260,17 @@ function DealerCard({
         <SelectionDot selected={selected} />
       </button>
 
-      {dealer.phone && (
-        <div className="border-t border-amp-line/70 px-4 py-2.5 pl-17.5">
-          <a
-            href={`tel:${dealer.phone}`}
-            className="inline-flex items-center gap-1.5 rounded text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-amp-accent"
-          >
-            <PhoneIcon className="size-3.5" />
-            {dealer.phone.startsWith('+91')
-              ? `+91 ${formatPhoneForDisplay(dealer.phone)}`
-              : dealer.phone}
-          </a>
-        </div>
-      )}
+      {/* Every card carries a number: the dealer's own, or customer care when
+          the dealer master has none, so the customer always has someone to call. */}
+      <div className="border-t border-amp-line/70 px-4 py-2.5 pl-17.5">
+        <a
+          href={`tel:${dealer.phone ?? SUPPORT_PHONE.tel}`}
+          className="inline-flex items-center gap-1.5 rounded text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-amp-accent"
+        >
+          <PhoneIcon className="size-3.5" />
+          {dealer.phone ? displayPhone(dealer.phone) : `Customer care · ${SUPPORT_PHONE.display}`}
+        </a>
+      </div>
     </div>
   );
 }

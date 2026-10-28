@@ -50,6 +50,7 @@ const KNOWN_VARS = [
   'CRON_SECRET',
   'OTP_ECHO_ENABLED',
   'JUSPAY_ENABLED',
+  'BUY_NOW_ENABLED',
   'JUSPAY_MERCHANT_ID',
   'JUSPAY_API_KEY',
   'JUSPAY_PAYMENT_PAGE_CLIENT_ID',
@@ -75,9 +76,10 @@ export function register(): void {
   const appEnv = process.env.APP_ENV ?? 'production (defaulted)';
   const juspayLive = process.env.JUSPAY_ENABLED === 'true';
   const otpEcho = process.env.OTP_ECHO_ENABLED === 'true';
+  const buyNow = process.env.BUY_NOW_ENABLED === 'true';
 
   console.info(
-    `[startup] APP_ENV=${appEnv} juspay=${juspayLive ? 'REAL' : 'fake'} otpEcho=${otpEcho ? 'ON' : 'off'}`,
+    `[startup] APP_ENV=${appEnv} juspay=${juspayLive ? 'REAL' : 'fake'} otpEcho=${otpEcho ? 'ON' : 'off'} buyNow=${buyNow ? 'ON' : 'off'}`,
   );
 
   /*

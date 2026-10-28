@@ -40,6 +40,33 @@ describe('arriving from a product page', () => {
   });
 });
 
+describe('the two scooter layouts', () => {
+  it('lists every version as its own card by default', () => {
+    expect(parsePrefill({}).layout).toBe('list');
+  });
+
+  it('groups versions under one card with ?view=variants', () => {
+    expect(parsePrefill({ view: 'variants', model: 'nexus-ex-plus-intellipack' })).toMatchObject({
+      layout: 'variants',
+      modelCode: 'nexus-ex-plus-intellipack',
+    });
+  });
+
+  it('falls back to the list for anything else', () => {
+    const prefill = parsePrefill({ view: 'grid' });
+    expect(prefill.layout).toBe('list');
+    expect(prefill.dropped).toContain('view=grid');
+  });
+});
+
+describe('arriving from an Intellipack page', () => {
+  it('recognises both Intellipack pages', () => {
+    const from = (referer: string) => parsePrefill({}, { referer }).modelCode;
+    expect(from('https://ampere-electric.com/nexus-ex-plus-intellipack')).toBe('nexus-ex-plus-intellipack');
+    expect(from('https://ampere-electric.com/new-magnus-gmax-iot')).toBe('magnus-gmax-intellipack');
+  });
+});
+
 describe('arriving from a product page without ?model=', () => {
   const from = (referer: string, params = {}) => parsePrefill(params, { referer });
 

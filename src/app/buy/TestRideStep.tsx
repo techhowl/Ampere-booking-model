@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react';
 import type { ModelAvailability } from '@/lib/catalog/availability';
 import type { NearbyDealer } from '@/lib/schemas/dealer';
-import { HELP_TOPICS, HELP_TOPIC_LABELS } from '@/lib/schemas/test-ride';
+import { HELP_TOPIC_LABELS, SHOWN_HELP_TOPICS, type HelpTopic } from '@/lib/schemas/test-ride';
+import { getModel } from '@/lib/catalog/catalog';
+import { displayPhone } from '@/lib/phone-format';
+import { SUPPORT_PHONE } from '@/lib/contact';
 import type { OfferedDay } from '@/lib/test-rides/slots';
 import { FOCUS, Notice, Pill, PrimaryButton, Skeleton } from '@/components/ui';
 import { CheckIcon, PhoneIcon, StoreIcon } from '@/components/Brand';
@@ -78,10 +81,27 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
   const selectedDay = days?.find((d) => d.date === date) ?? null;
   const wantsFinancing = topics.includes('financing');
 
-  function toggleTopic(topic: string) {
-    setTopics((current) =>
-      current.includes(topic) ? current.filter((t) => t !== topic) : [...current, topic],
-    );
+  function toggleTopic(topic: HelpTopic) {
+    const on = !topics.includes(topic);
+    setTopics((current) => (on ? [...current, topic] : current.filter((t) => t !== topic)));
+    // Asking for the brochure hands it over there and then, rather than
+    // promising to send it. Ours download; a main-site leaflet opens in a tab.
+    if (topic === 'brochure' && on) downloadBrochure();
+  }
+
+  function downloadBrochure() {
+    const url = getModel(model.code)?.brochureUrl;
+    if (!url) return;
+    if (url.startsWith('/')) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Ampere ${model.name} brochure.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } else {
+      window.open(url, '_blank', 'noopener');
+    }
   }
 
   async function submit(event: React.FormEvent) {
@@ -212,9 +232,10 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
                 selected={window.code === slot}
                 disabled={!window.available}
                 onClick={() => setSlot(window.code)}
-                className="rounded-xl"
+                // One line even on a narrow phone: the 12-hour labels are long.
+                className="whitespace-nowrap rounded-xl px-1.5 text-[12px] sm:px-4 sm:text-[14px]"
               >
-                {window.label.replace(/–/g, '-')}
+                {window.label}
               </Pill>
             ))}
           </div>
@@ -226,7 +247,7 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
 
       <Group label="Anything we can help you with?" hint="Optional">
         <div className="flex flex-wrap gap-2">
-          {HELP_TOPICS.map((topic) => {
+          {SHOWN_HELP_TOPICS.map((topic) => {
             const on = topics.includes(topic);
             return (
               <button
@@ -305,13 +326,15 @@ export function TestRideConfirmation({
   booking,
   canBuy,
   onBuy,
-  onDone,
+  backHref,
 }: {
   booking: Booking;
   canBuy: boolean;
   onBuy: () => void;
-  onDone: () => void;
+  /** The scooter's own page on ampere-electric.com — where they came from. */
+  backHref: string;
 }) {
+  const phone = booking.dealer.phone;
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col items-center gap-3 pt-2 text-center">
@@ -345,15 +368,15 @@ export function TestRideConfirmation({
               {booking.dealer.address}
             </p>
           )}
-          {booking.dealer.phone && (
-            <a
-              href={`tel:${booking.dealer.phone}`}
-              className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline"
-            >
-              <PhoneIcon className="size-3.5" />
-              Call the dealer
-            </a>
-          )}
+          {/* The number itself, so it can be read and saved, not just tapped.
+              Customer care when the dealer master has none. */}
+          <a
+            href={`tel:${phone ?? SUPPORT_PHONE.tel}`}
+            className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline"
+          >
+            <PhoneIcon className="size-3.5" />
+            {phone ? displayPhone(phone) : `Customer care · ${SUPPORT_PHONE.display}`}
+          </a>
         </div>
       </div>
 
@@ -369,13 +392,12 @@ export function TestRideConfirmation({
           ride is not the end of the journey. */}
       <div className="flex flex-col gap-3">
         {canBuy && <PrimaryButton onClick={onBuy}>Buy your {booking.modelName} now</PrimaryButton>}
-        <button
-          type="button"
-          onClick={onDone}
-          className={`min-h-11 cursor-pointer rounded-xl text-[14px] font-medium text-amp-muted transition-colors hover:text-amp-ink ${FOCUS}`}
+        <a
+          href={backHref}
+          className={`flex min-h-11 items-center justify-center rounded-xl text-[14px] font-medium text-amp-muted transition-colors hover:text-amp-ink ${FOCUS}`}
         >
           Back to the scooters
-        </button>
+        </a>
       </div>
     </div>
   );

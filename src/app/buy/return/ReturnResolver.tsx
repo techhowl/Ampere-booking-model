@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getModel } from '@/lib/catalog/catalog';
-import { formatPhoneForDisplay } from '@/lib/phone-format';
+import { displayPhone } from '@/lib/phone-format';
 import { SUPPORT_PHONE } from '@/lib/contact';
 import type { CreatedOrderResponse } from '@/lib/schemas/order';
 import { ProductImage } from '@/components/ProductImage';
@@ -164,7 +164,11 @@ function Paid({ status }: { status: Status }) {
                 Your dealer
               </p>
               <p className="mt-1 text-[16px] font-semibold text-amp-ink">{status.dealer.name}</p>
-              {status.dealer.phone && <CallLink phone={status.dealer.phone} />}
+              {status.dealer.phone ? (
+                <CallLink phone={status.dealer.phone} />
+              ) : (
+                <CallLink phone={SUPPORT_PHONE.tel} label="Customer care" />
+              )}
             </div>
           </div>
         </Card>
@@ -405,7 +409,7 @@ function NextStep({ n, title, children }: { n: number; title: string; children: 
 }
 
 function CallLink({ phone, label }: { phone: string; label?: string }) {
-  const shown = phone.startsWith('+91') ? `+91 ${formatPhoneForDisplay(phone)}` : phone;
+  const shown = displayPhone(phone);
   return (
     <a
       href={`tel:${phone}`}

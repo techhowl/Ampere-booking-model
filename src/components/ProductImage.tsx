@@ -1,72 +1,69 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Model } from '@/lib/catalog/catalog';
+import { angleCount, photoSrc, type Model } from '@/lib/catalog/catalog';
 
 /**
- * The scooter.
+ * The scooter, in one colour, from one angle.
  *
- * ASSET SLOT. Drop photography into `public/models/` and this starts using it
- * with no code change:
+ * Photography lives in `public/models/<image>/<colour>-<n>.webp`, one file per
+ * angle, in the order the main site shows them — see photoSrc() and the
+ * `angles` counts in the catalog. WebP with a transparent background.
  *
- *   public/models/nexus-ex-plus-carbon-knight.webp  per colour, preferred
- *   public/models/nexus-ex-plus.webp                one image for the model
- *
- * WebP with a transparent background — the panel behind is near-black, so an
- * opaque background shows as a box. Until a file exists, a placeholder in the
- * selected colour stands in, deliberately obviously a placeholder.
+ * A missing angle falls back to the colour's first angle; a missing colour
+ * falls back to a placeholder in that colour, deliberately obviously one.
  */
 
 interface Props {
   model: Model;
   colourCode: string | null;
+  /** Which photograph of the colour, from 0. Out-of-range values wrap. */
+  angle?: number;
   className?: string;
   priority?: boolean;
 }
 
-type LoadState = 'colour' | 'model' | 'placeholder';
+type LoadState = 'angle' | 'first' | 'placeholder';
 
-export function ProductImage({ model, colourCode, className, priority }: Props) {
-  const [state, setState] = useState<LoadState>('colour');
+export function ProductImage({ model, colourCode, angle = 0, className, priority }: Props) {
+  const [state, setState] = useState<LoadState>('angle');
 
-  // Photography is shot per colour, so there is always a colour to show even
-  // before the customer picks one — the model's first. Falling back to a
-  // colourless `<model>.webp` would 404, because no such file is shot.
+  // There is always a colour to show, even before the customer picks one —
+  // the model's first.
   const colour = model.colours.find((c) => c.code === colourCode) ?? model.colours[0];
+  const count = angleCount(model, colour?.code);
+  const index = ((angle % count) + count) % count;
 
   const img = useRef<HTMLImageElement>(null);
-  const fail = () => setState((current) => (current === 'colour' ? 'model' : 'placeholder'));
+  const fail = () =>
+    setState((current) => (current === 'angle' && index > 0 ? 'first' : 'placeholder'));
 
   useEffect(() => {
-    setState('colour');
-  }, [colourCode, model.code]);
+    setState('angle');
+  }, [colour?.code, model.code, index]);
 
   // A server-rendered image can 404 before React hydrates and starts
   // listening, and then onError never fires. Check for that on mount.
   useEffect(() => {
     const el = img.current;
     if (el?.complete && el.naturalWidth === 0) fail();
-  }, [state]);
+  });
 
   if (state === 'placeholder' || !colour) {
     return <ProductPlaceholder model={model} hex={colour?.hex ?? '#394150'} className={className} />;
   }
 
-  const src =
-    state === 'colour'
-      ? `/models/${model.image}-${colour.code}.webp`
-      : `/models/${model.image}.webp`;
-
   return (
-    // Plain <img>: next/image wants the file to exist at build time, and these
-    // do not yet. Swap to next/image once the photography is committed.
+    // Plain <img>: the photographs are already sized for the panel, and
+    // next/image would add a round trip through the optimiser for nothing.
     // eslint-disable-next-line @next/next/no-img-element
     <img
       ref={img}
-      src={src}
-      alt={`Ampere ${model.name}${colour ? ` in ${colour.name}` : ''}`}
+      src={photoSrc(model, colour.code, state === 'first' ? 0 : index)}
+      alt={`Ampere ${model.name} in ${colour.name}`}
       className={className}
       loading={priority ? 'eager' : 'lazy'}
+      decoding="async"
       onError={fail}
     />
   );

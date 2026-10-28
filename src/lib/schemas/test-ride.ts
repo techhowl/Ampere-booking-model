@@ -7,16 +7,26 @@ import { SLOT_WINDOW_CODES } from '@/lib/test-rides/slots';
 export const TEST_RIDE_MODES = ['home', 'dealer'] as const;
 
 /**
- * Journey document section 03. The existing form already collects this and
- * nothing acts on it; picking "financing" opens the EMI widget.
+ * Journey document section 03. What the customer would like help with on the
+ * day; it travels to the dealer with the booking.
+ *
+ * 'brochure' replaced 'specs' on the page — choosing it also downloads the
+ * scooter's brochure. 'financing' and 'specs' stay valid so older bookings
+ * still read; which topics the page OFFERS is SHOWN_HELP_TOPICS.
  */
-export const HELP_TOPICS = ['offers', 'financing', 'specs'] as const;
+export const HELP_TOPICS = ['offers', 'brochure', 'financing', 'specs'] as const;
 
-export const HELP_TOPIC_LABELS: Record<(typeof HELP_TOPICS)[number], string> = {
+export type HelpTopic = (typeof HELP_TOPICS)[number];
+
+export const HELP_TOPIC_LABELS: Record<HelpTopic, string> = {
   offers: 'Current offers',
+  brochure: 'Brochure',
   financing: 'Financing and EMI',
   specs: 'Specifications',
 };
+
+/** Offered on the page today. Financing returns with EMI. */
+export const SHOWN_HELP_TOPICS: readonly HelpTopic[] = ['offers', 'brochure'];
 
 export const testRideSchema = z.object({
   modelCode: z.enum(MODEL_CODES as [string, ...string[]]),

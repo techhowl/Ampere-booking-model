@@ -85,6 +85,19 @@ an admin edit. Prices are deliberately **not** there — they belong to
 All seeded dealers, pincodes, regions and prices are placeholders standing in
 for open items 2, 4 and 5.
 
+### Links into /buy, and the two switches
+
+| Link | What it does |
+|---|---|
+| `/buy?model=nexus-ex-plus` | Opens with that scooter chosen. Codes or the main site's page names (`gmax`, `reovyb`, `new-magnus-gmax-iot`, `nexus-ex-plus-intellipack`) |
+| `&colour=steel-grey` | …in that colour |
+| `&intent=testride` | Preselects the test ride (only matters when Buy Now is on) |
+| `?view=variants` | Scooter step shows one card per scooter with Standard / Intellipack tiles. Without it, every version is its own card |
+
+`BUY_NOW_ENABLED=true` brings back the Buy Now branch (price, payment, Juspay).
+Off by default: launch is test rides only, and the order route refuses while
+it is off. Photos and brochures: `public/models/README.md`, `public/brochures/`.
+
 ---
 
 ## Local setup

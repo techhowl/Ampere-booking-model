@@ -60,6 +60,7 @@ export default async function BuyPage({
           attribution={attributionOf(prefill)}
           resume={resume}
           idleSeconds={env.sessionIdleSeconds}
+          buyEnabled={env.buyNowEnabled}
         />
       </main>
       <SiteFooter />

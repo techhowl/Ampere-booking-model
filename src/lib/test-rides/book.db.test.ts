@@ -77,7 +77,7 @@ describe('booking a ride', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.booking.slot).toBe('Tomorrow, 13:00 – 15:00');
+    expect(result.booking.slot).toBe('Tomorrow, 1:00 PM – 3:00 PM');
     expect(result.booking.dealer.name).toBe('Ampere Indiranagar');
     expect(result.booking.dealerNotified).toBe(true);
 
@@ -117,7 +117,7 @@ describe('booking a ride', () => {
     expect(sent?.customerName).toBe('Asha Menon');
     expect(sent?.modelName).toBe('Nexus EX+');
     expect(sent?.colourName).toBe('Carbon Knight');
-    expect(sent?.slot).toBe('Tomorrow, 13:00 – 15:00');
+    expect(sent?.slot).toBe('Tomorrow, 1:00 PM – 3:00 PM');
 
     expect(sent?.customerPhoneLast4).toBe('3210');
     expect(JSON.stringify(sent)).not.toContain('9876543210');

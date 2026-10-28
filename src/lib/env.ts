@@ -106,6 +106,16 @@ export const env = {
     return Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes * 60) : 3600;
   },
 
+  /**
+   * Buy Now — price, payment option, Juspay. Off for launch, which is test
+   * rides only; every part of it is kept and comes back with
+   * BUY_NOW_ENABLED=true. Off means hidden on the page AND refused by the
+   * order route, so it cannot be reached by calling the API directly.
+   */
+  get buyNowEnabled(): boolean {
+    return process.env.BUY_NOW_ENABLED === 'true';
+  },
+
   /** Turnstile is inert until keys arrive; see the OTP route. */
   get turnstileSecret(): string | null {
     return process.env.TURNSTILE_SECRET || null;

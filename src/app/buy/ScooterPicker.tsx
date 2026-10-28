@@ -1,6 +1,13 @@
 'use client';
 
-import { ACTIVE_FAMILIES, getModel, modelsInFamily, swatchBackground } from '@/lib/catalog/catalog';
+import type { ReactNode } from 'react';
+import {
+  ACTIVE_FAMILIES,
+  getModel,
+  modelsInFamily,
+  swatchBackground,
+  type Model,
+} from '@/lib/catalog/catalog';
 import type { ModelAvailability } from '@/lib/catalog/availability';
 import { FOCUS, Notice, PrimaryButton, SelectionDot, Skeleton } from '@/components/ui';
 import { ProductImage } from '@/components/ProductImage';
@@ -8,13 +15,22 @@ import { ChargeIcon, RangeIcon, SpeedIcon, TagIcon } from '@/components/Brand';
 import { StepActions, StepHeader } from './StepFrame';
 
 /**
- * Step two: family tabs, then a card per variant. The chosen card opens to
- * show its colours right under its specs, so the colour is picked where the
- * scooter is — not at the bottom of a list the customer has to scroll past.
+ * Step two: family tabs, then the scooters. The chosen card opens to show its
+ * choices right under its specs, so they are made where the scooter is — not
+ * at the bottom of a list the customer has to scroll past.
  *
- * Each card carries the ex-showroom price, three specs and the offers strip.
- * Prices come from the server; nothing here computes money. The model and
- * colour arrive preselected when the customer came from a product page.
+ * Two layouts for the scooters sold in two versions (Nexus EX+ and Magnus
+ * GMax, each with an Intellipack):
+ *
+ *   list      every version its own card, one below the other   (/buy)
+ *   variants  one card per scooter; the chosen card shows Standard and
+ *             Intellipack as tiles above the colours, like the variant
+ *             picker on a shopping site                         (/buy?view=variants)
+ *
+ * Either way the customer ends up choosing one model code and one colour, so
+ * everything after this step is the same.
+ *
+ * Prices come from the server; nothing here computes money.
  */
 
 interface Props {
@@ -22,6 +38,9 @@ interface Props {
   models: ModelAvailability[] | null;
   loadFailed: boolean;
   onRetry: () => void;
+  layout: 'list' | 'variants';
+  /** Stock notes only mean something when the customer can buy. */
+  showStock: boolean;
   selectedModelCode: string | null;
   selectedColourCode: string | null;
   onSelectModel: (model: ModelAvailability) => void;
@@ -34,6 +53,8 @@ export function ScooterPicker({
   models,
   loadFailed,
   onRetry,
+  layout,
+  showStock,
   selectedModelCode,
   selectedColourCode,
   onSelectModel,
@@ -70,13 +91,28 @@ export function ScooterPicker({
     );
   }
 
-  const selected = models.find((m) => m.code === selectedModelCode) ?? null;
-  const activeFamily = getModel(selectedModelCode)?.family ?? ACTIVE_FAMILIES[0]?.code ?? 'nexus';
-
   const byCode = new Map(models.map((m) => [m.code, m]));
-  const variants = modelsInFamily(activeFamily)
-    .map((m) => byCode.get(m.code))
-    .filter((m): m is ModelAvailability => m !== undefined);
+  const available = (list: Model[]) =>
+    list.map((m) => byCode.get(m.code)).filter((m): m is ModelAvailability => m !== undefined);
+
+  const selected = byCode.get(selectedModelCode ?? '') ?? null;
+  const activeFamily = getModel(selectedModelCode)?.family ?? ACTIVE_FAMILIES[0]?.code ?? 'nexus';
+  const inFamily = available(modelsInFamily(activeFamily));
+
+  // The variants layout shows one card per scooter: its versions grouped.
+  const groupOf = (m: ModelAvailability) => getModel(m.code)?.variant.group ?? m.code;
+  const groups = [...new Set(inFamily.map(groupOf))].map((group) =>
+    inFamily.filter((m) => groupOf(m) === group),
+  );
+
+  const colourPicker = selected && (
+    <ColourPicker
+      modelName={selected.name}
+      colours={selected.colours}
+      selectedCode={selectedColourCode}
+      onSelect={onSelectColour}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-7">
@@ -96,9 +132,7 @@ export function ScooterPicker({
                 type="button"
                 aria-pressed={isActive}
                 onClick={() => {
-                  const first = modelsInFamily(family.code)
-                    .map((m) => byCode.get(m.code))
-                    .find((m): m is ModelAvailability => m !== undefined);
+                  const first = available(modelsInFamily(family.code))[0];
                   if (first) onSelectModel(first);
                 }}
                 className={[
@@ -116,16 +150,47 @@ export function ScooterPicker({
         </div>
 
         <div className="flex flex-col gap-3">
-          {variants.map((variant) => (
-            <VariantCard
-              key={variant.code}
-              model={variant}
-              selected={variant.code === selectedModelCode}
-              colourCode={variant.code === selectedModelCode ? selectedColourCode : null}
-              onSelect={() => onSelectModel(variant)}
-              onSelectColour={onSelectColour}
-            />
-          ))}
+          {layout === 'list'
+            ? inFamily.map((model) => {
+                const isSelected = model.code === selectedModelCode;
+                return (
+                  <ScooterCard
+                    key={model.code}
+                    title={model.name}
+                    price={model.price ? `${model.price.exShowroom.display}*` : 'Price on enquiry'}
+                    shown={model}
+                    colourCode={isSelected ? selectedColourCode : null}
+                    selected={isSelected}
+                    showStock={showStock}
+                    onSelect={() => onSelectModel(model)}
+                  >
+                    {colourPicker}
+                  </ScooterCard>
+                );
+              })
+            : groups.map((versions) => {
+                const standard = versions[0]!;
+                const chosen = versions.find((v) => v.code === selectedModelCode) ?? null;
+                return (
+                  <ScooterCard
+                    key={standard.code}
+                    title={getModel(standard.code)?.variant.groupName ?? standard.name}
+                    price={groupPrice(versions, chosen)}
+                    shown={chosen ?? standard}
+                    colourCode={chosen ? selectedColourCode : null}
+                    selected={!!chosen}
+                    showStock={showStock}
+                    onSelect={() => {
+                      if (!chosen) onSelectModel(standard);
+                    }}
+                  >
+                    {versions.length > 1 && chosen && (
+                      <VariantPicker versions={versions} chosen={chosen} onSelect={onSelectModel} />
+                    )}
+                    {colourPicker}
+                  </ScooterCard>
+                );
+              })}
         </div>
       </div>
 
@@ -140,37 +205,59 @@ export function ScooterPicker({
   );
 }
 
-function VariantCard({
-  model,
-  selected,
+/**
+ * A scooter sold in two versions shows the chosen version's price, or — before
+ * one is chosen — "From" the lowest. Both figures are the server's.
+ */
+function groupPrice(versions: ModelAvailability[], chosen: ModelAvailability | null): string {
+  if (chosen) return chosen.price ? `${chosen.price.exShowroom.display}*` : 'Price on enquiry';
+  const priced = versions.filter((v) => v.price);
+  if (priced.length === 0) return 'Price on enquiry';
+  const lowest = priced.reduce((a, b) =>
+    b.price!.exShowroom.amount < a.price!.exShowroom.amount ? b : a,
+  );
+  return `${versions.length > 1 ? 'From ' : ''}${lowest.price!.exShowroom.display}*`;
+}
+
+/* ------------------------------------------------------------------ */
+
+function ScooterCard({
+  title,
+  price,
+  shown,
   colourCode,
+  selected,
+  showStock,
   onSelect,
-  onSelectColour,
+  children,
 }: {
-  model: ModelAvailability;
-  selected: boolean;
+  title: string;
+  price: string;
+  /** The version whose photo, specs and offer the card shows. */
+  shown: ModelAvailability;
   colourCode: string | null;
+  selected: boolean;
+  showStock: boolean;
   onSelect: () => void;
-  onSelectColour: (colourCode: string) => void;
+  /** What opens under the specs once this card is chosen. */
+  children?: ReactNode;
 }) {
-  const definition = getModel(model.code);
+  const definition = getModel(shown.code);
   const specs = definition?.specs;
 
   // The offers strip, and a stock note when there is one. Inside the card's
-  // button until it is chosen; after the colours once it is, so they always
+  // button until it is chosen; after the choices once it is, so they always
   // sit at the foot of the card.
   const footer = (
     <>
-      {/* The offers strip. Copy is a placeholder until Marketing supplies it. */}
-      <p className="flex items-start gap-2 bg-amp-offer px-4 py-2.5 text-[12px] leading-relaxed text-amp-offer-ink">
-        <TagIcon className="mt-0.5 size-3.5 shrink-0" />
-        <span>
-          Benefits up to ₹5,000. Additional offers on Flipkart and Amazon. Visit the dealership to
-          know more.
-        </span>
-      </p>
+      {definition && (
+        <p className="flex items-start gap-2 bg-amp-offer px-4 py-2.5 text-[12px] leading-relaxed text-amp-offer-ink">
+          <TagIcon className="mt-0.5 size-3.5 shrink-0" />
+          <span>{definition.offer}</span>
+        </p>
+      )}
 
-      {!model.inStock && model.price && (
+      {showStock && !shown.inStock && shown.price && (
         <p className="bg-amber-50 px-4 py-2 text-[12px] text-amber-900">
           In short supply in your area — your dealer will confirm the timeline.
         </p>
@@ -180,7 +267,7 @@ function VariantCard({
 
   return (
     // A div holding a button, not one big button: the chosen card opens to
-    // show colour buttons, and a button cannot sit inside another.
+    // show its own buttons, and a button cannot sit inside another.
     <div
       className={[
         'overflow-hidden rounded-2xl border bg-white transition-all duration-200',
@@ -210,10 +297,8 @@ function VariantCard({
             )}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[16px] font-bold leading-snug text-amp-ink">{model.name}</span>
-            <span className="mt-0.5 block text-[14px] font-semibold text-amp-ink">
-              {model.price ? `${model.price.exShowroom.display}*` : 'Price on enquiry'}
-            </span>
+            <span className="block text-[16px] font-bold leading-snug text-amp-ink">{title}</span>
+            <span className="mt-0.5 block text-[14px] font-semibold text-amp-ink">{price}</span>
           </span>
           <SelectionDot selected={selected} />
         </span>
@@ -229,16 +314,59 @@ function VariantCard({
         {!selected && footer}
       </button>
 
-      {selected && model.colours.length > 0 && (
-        <ColourPicker
-          modelName={model.name}
-          colours={model.colours}
-          selectedCode={colourCode}
-          onSelect={onSelectColour}
-        />
-      )}
-
+      {selected && children}
       {selected && footer}
+    </div>
+  );
+}
+
+/**
+ * Standard or Intellipack, as tiles — the variant picker shoppers know from
+ * Amazon and Flipkart. Each tile carries its own price, so the difference is
+ * visible before choosing.
+ */
+function VariantPicker({
+  versions,
+  chosen,
+  onSelect,
+}: {
+  versions: ModelAvailability[];
+  chosen: ModelAvailability;
+  onSelect: (model: ModelAvailability) => void;
+}) {
+  const label = (m: ModelAvailability) => getModel(m.code)?.variant.label ?? m.name;
+
+  return (
+    <div role="group" aria-label="Variant" className="amp-rise border-t border-amp-line/70 px-4 pb-1 pt-3.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-[13px] font-medium text-amp-ink">Variant</p>
+        <p className="text-[13px] font-semibold text-amp-ink">{label(chosen)}</p>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2.5">
+        {versions.map((version) => {
+          const isSelected = version.code === chosen.code;
+          return (
+            <button
+              key={version.code}
+              type="button"
+              onClick={() => onSelect(version)}
+              aria-pressed={isSelected}
+              className={[
+                'flex min-h-14 cursor-pointer flex-col items-start justify-center rounded-xl border px-3.5 py-2.5 text-left transition-all duration-200',
+                FOCUS,
+                isSelected
+                  ? 'border-amp-accent bg-amp-accent-tint/60 ring-1 ring-amp-accent'
+                  : 'border-amp-line bg-white hover:border-amp-ink/40',
+              ].join(' ')}
+            >
+              <span className="text-[14px] font-semibold text-amp-ink">{label(version)}</span>
+              <span className="mt-0.5 text-[12px] text-amp-muted">
+                {version.price ? version.price.exShowroom.display : 'Price on enquiry'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

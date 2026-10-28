@@ -171,7 +171,7 @@ describe('the bookmark is only a hint', () => {
     expect(r?.booking).toMatchObject({
       bookingId: ride.id,
       dealer: { name: 'Ampere Koramangala' },
-      slot: 'Tomorrow, 13:00 – 15:00',
+      slot: 'Tomorrow, 1:00 PM – 3:00 PM',
     });
   });
 

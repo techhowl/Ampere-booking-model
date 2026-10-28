@@ -31,12 +31,15 @@ export interface SlotWindow {
   endMinutes: number;
 }
 
-/** The four existing windows, unchanged from the form this replaces. */
+/**
+ * The four existing windows, unchanged from the form this replaces. Labelled
+ * on the 12-hour clock, the way customers read times.
+ */
 export const SLOT_WINDOWS: readonly SlotWindow[] = [
-  { code: 'w1', label: '10:00 – 12:00', startMinutes: 10 * 60, endMinutes: 12 * 60 },
-  { code: 'w2', label: '13:00 – 15:00', startMinutes: 13 * 60, endMinutes: 15 * 60 },
-  { code: 'w3', label: '15:00 – 17:00', startMinutes: 15 * 60, endMinutes: 17 * 60 },
-  { code: 'w4', label: '17:00 – 20:00', startMinutes: 17 * 60, endMinutes: 20 * 60 },
+  { code: 'w1', label: '10:00 AM – 12:00 PM', startMinutes: 10 * 60, endMinutes: 12 * 60 },
+  { code: 'w2', label: '1:00 PM – 3:00 PM', startMinutes: 13 * 60, endMinutes: 15 * 60 },
+  { code: 'w3', label: '3:00 PM – 5:00 PM', startMinutes: 15 * 60, endMinutes: 17 * 60 },
+  { code: 'w4', label: '5:00 PM – 8:00 PM', startMinutes: 17 * 60, endMinutes: 20 * 60 },
 ] as const;
 
 export const SLOT_WINDOW_CODES = SLOT_WINDOWS.map((w) => w.code);

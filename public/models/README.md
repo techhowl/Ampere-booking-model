@@ -1,28 +1,21 @@
 # Product photography
 
-Files here are served directly. Naming drives resolution — no code change
-needed when you add one:
+One folder per scooter, one file per colour per angle, in the order the
+scooter's page on ampere-electric.com shows them:
 
 ```
-<model-code>-<colour-code>.webp    per colour, preferred
-<model-code>.webp                  one image for the whole model
+public/models/<image>/<colour-code>-<n>.webp      n = 1, 2, 3 …
 ```
 
-`ProductImage` tries the colour file, falls back to the model file, then draws
-a placeholder silhouette. A partial set is fine.
+`<image>` and the number of angles per colour are set on each model in
+`src/lib/catalog/catalog.ts` (`image`, `angles`). Two models may share a
+folder: the Nexus EX+ Intellipack uses `nexus-ex-plus/`, as the main site does.
+`src/lib/catalog/catalog.test.ts` fails if a colour or angle in the catalog has
+no file here.
 
-**Model codes** and **colour codes** come from `src/lib/catalog/catalog.ts`.
+The arrows on the product panel step through the angles; the colour swatches
+change the colour.
 
-**Format:** WebP with a transparent background. The panel behind is near-black
-(`--color-ampere-ink`), so an opaque background shows as a box.
-
-**Size:** keep each under ~100KB. This is a mobile paid-traffic page with a
-180KB first-load budget. The originals Ampere supplied were 9504x6336 and
-~1.5MB each; they are resized to 1100px wide here, which is ample for a panel
-that renders at ~420px even on a 2x display.
-
-Unoptimised originals are kept outside the build at `assets/models-source/`.
-
-## Currently missing
-
-Nothing — every model and colour in the catalog has a photograph.
+**Format:** WebP with a transparent background, resized to 1100px wide
+(~50–100KB each). The originals — the main site's own files, up to 5000px and
+1MB+ — are kept outside the build at `assets/models-source/site-angles/`.

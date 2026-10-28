@@ -37,6 +37,13 @@ export interface Prefill {
   dealerCode: string | null;
   /** How modelCode was decided. Null when nothing was preselected. */
   modelFrom: 'link' | 'referrer' | null;
+  /**
+   * How step two lays out a scooter sold in two versions. 'list' (the default)
+   * gives Nexus EX+ and Nexus EX+ Intellipack a card each; 'variants'
+   * (?view=variants) gives them one card with Standard / Intellipack chips,
+   * like a variant picker on a shopping site.
+   */
+  layout: 'list' | 'variants';
   /** Carried from any touchpoint that already knows it. */
   pincode: string | null;
   src: string | null;
@@ -97,6 +104,12 @@ export function parsePrefill(
     }
   }
 
+  const requestedView = clamp(first(params.view));
+  const layout: Prefill['layout'] = requestedView === 'variants' ? 'variants' : 'list';
+  if (requestedView && requestedView !== 'variants' && requestedView !== 'list') {
+    dropped.push(`view=${requestedView}`);
+  }
+
   const requestedIntent = clamp(first(params.intent));
   let intent: Prefill['intent'] = 'undecided';
   if (requestedIntent) {
@@ -123,6 +136,7 @@ export function parsePrefill(
   return {
     modelCode: model?.code ?? null,
     modelFrom: model ? (fromReferrer ? 'referrer' : 'link') : null,
+    layout,
     colourCode,
     intent,
     // Validated against the dealer master at save time, not here — this is

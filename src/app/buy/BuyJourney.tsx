@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { MODELS, getModel } from '@/lib/catalog/catalog';
+import { MAIN_SITE, getModel } from '@/lib/catalog/catalog';
 import type { ModelAvailability } from '@/lib/catalog/availability';
 import type { LeadCreatedResponse } from '@/lib/schemas/lead';
 import type { NearbyDealer, NearbyDealersResponse } from '@/lib/schemas/dealer';
@@ -42,6 +42,11 @@ import type { Prefill } from './prefill';
  * amp_journey cookie. After SESSION_IDLE_MINUTES without activity the server
  * stops honouring the session, and the customer verifies their number again —
  * with everything they chose still in place.
+ *
+ * With Buy Now switched off (BUY_NOW_ENABLED, off for launch) step 4 drops
+ * out: every journey is a test ride, and the dealer step leads straight to
+ * the slot picker. Nothing of the buy branch is removed — it comes back with
+ * the setting.
  */
 
 interface Props {
@@ -49,9 +54,10 @@ interface Props {
   attribution: Record<string, unknown>;
   resume: Resume | null;
   idleSeconds: number;
+  buyEnabled: boolean;
 }
 
-export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props) {
+export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabled }: Props) {
   const [step, setStep] = useState<StepId>(resume?.step ?? 'details');
 
   const [lead, setLead] = useState<LeadCreatedResponse | null>(resume?.lead ?? null);
@@ -75,12 +81,15 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
   const [dealer, setDealer] = useState<NearbyDealer | null>(resume?.dealer ?? null);
 
   // Arriving from a "Book a test ride" button preselects that card at step 4.
+  // With Buy Now off there is no step 4: every journey is a test ride.
   const [intent, setIntent] = useState<Intent | null>(
-    resume
-      ? resume.intent
-      : prefill.intent === 'buy' || prefill.intent === 'testride'
-        ? prefill.intent
-        : null,
+    !buyEnabled
+      ? 'testride'
+      : resume
+        ? resume.intent
+        : prefill.intent === 'buy' || prefill.intent === 'testride'
+          ? prefill.intent
+          : null,
   );
   const [booking, setBooking] = useState<Booking | null>(resume?.booking ?? null);
 
@@ -144,9 +153,13 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
     );
   }, [model]);
 
+  // Switching between versions of one scooter keeps the colour when the new
+  // one comes in it — Standard to Intellipack should not lose Steel Grey.
   const onSelectModel = useCallback((entry: ModelAvailability) => {
     setModelCode(entry.code);
-    setColourCode(null);
+    setColourCode((current) =>
+      current && entry.colours.some((c) => c.code === current) ? current : null,
+    );
   }, []);
 
   /* ---------------------------------------------------------------- */
@@ -162,11 +175,14 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
     journey: verified && !!lead && !!availability && !!colourCode && !!dealer,
     finish: verified && !!lead && !!availability && !!colourCode && !!dealer && !!intent,
   };
-  const current: StepId = ready[step]
-    ? step
-    : ([...STEPS].reverse().find((id) => ready[id] && STEPS.indexOf(id) < STEPS.indexOf(step)) ??
+  // The steps on offer. Without Buy Now, step 4 (buy or test ride) is not one.
+  const steps = STEPS.filter((id) => buyEnabled || id !== 'journey');
+  const wanted: StepId = steps.includes(step) ? step : 'finish';
+  const current: StepId = ready[wanted]
+    ? wanted
+    : ([...steps].reverse().find((id) => ready[id] && steps.indexOf(id) < steps.indexOf(wanted)) ??
       'details');
-  const currentIndex = STEPS.indexOf(current);
+  const currentIndex = steps.indexOf(current);
   const currentRef = useRef(current);
   useEffect(() => {
     currentRef.current = current;
@@ -312,6 +328,8 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
           models={catalog}
           loadFailed={catalogFailed}
           onRetry={() => setCatalogAttempt((n) => n + 1)}
+          layout={prefill.layout}
+          showStock={buyEnabled}
           selectedModelCode={modelCode}
           selectedColourCode={colourCode}
           onSelectModel={onSelectModel}
@@ -331,7 +349,7 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
           preferredCode={dealer?.code ?? prefill.dealerCode}
           onConfirmed={(chosen) => {
             setDealer(chosen);
-            go('journey');
+            go(buyEnabled ? 'journey' : 'finish');
           }}
           onExpired={expire}
           onBack={() => go('scooter')}
@@ -355,7 +373,7 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
 
     case 'finish':
       if (!availability) break;
-      if (intent === 'buy') {
+      if (intent === 'buy' && buyEnabled) {
         content = (
           <BuyBranch
             model={availability}
@@ -369,16 +387,15 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
         content = (
           <TestRideConfirmation
             booking={booking}
-            canBuy={availability.price !== null}
+            canBuy={buyEnabled && availability.price !== null}
             // Spec 4: a completed test ride re-opens the buy branch.
             onBuy={() => {
               setBooking(null);
               setIntent('buy');
             }}
-            onDone={() => {
-              setBooking(null);
-              go('scooter');
-            }}
+            // Back to the page they came from on the main site — this
+            // scooter's own.
+            backHref={model?.pageUrl ?? MAIN_SITE}
           />
         );
       } else {
@@ -389,14 +406,14 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
             dealer={dealer}
             onBooked={setBooking}
             onExpired={expire}
-            onBack={() => go('journey')}
+            onBack={() => go(buyEnabled ? 'journey' : 'dealer')}
           />
         );
       }
       break;
   }
 
-  const stepperItems = STEPS.map((id) => ({
+  const stepperItems = steps.map((id) => ({
     id,
     label: {
       details: 'Details',
@@ -407,9 +424,6 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
     }[id],
   }));
 
-  // Before anything is chosen, the range's lead scooter stands in on the left.
-  const shown = model ?? MODELS[0]!;
-
   return (
     <div
       ref={rootRef}
@@ -417,12 +431,8 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
     >
       {/* The scooter. Sticky beside the form once there is room. */}
       <aside aria-label="Your scooter" className="lg:sticky lg:top-24 lg:self-start">
-        <ProductPanel
-          model={shown}
-          colourCode={colourCode}
-          preview={!model}
-          onColourChange={model ? setColourCode : undefined}
-        />
+        {/* The chosen scooter; before one is chosen, the whole range. */}
+        <ProductPanel model={model} colourCode={colourCode} onColourChange={setColourCode} />
         <SelectionSummary
           className="mt-4 hidden lg:grid"
           model={model}
@@ -442,7 +452,7 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds }: Props)
           steps={stepperItems}
           currentIndex={currentIndex}
           onJump={(index) => {
-            const target = STEPS[index];
+            const target = steps[index];
             if (target && index < currentIndex) go(target);
           }}
         />

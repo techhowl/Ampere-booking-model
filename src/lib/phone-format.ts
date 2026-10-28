@@ -51,3 +51,12 @@ export function formatPhoneForDisplay(e164: string): string {
   const national = e164.replace(/^\+91/, '');
   return `${national.slice(0, 5)} ${national.slice(5)}`;
 }
+
+/**
+ * Any stored number, as shown on screen: "+91 80400 00005" for an Indian
+ * number, anything else exactly as stored. For dealer and support numbers —
+ * never for a customer's own.
+ */
+export function displayPhone(phone: string): string {
+  return phone.startsWith('+91') ? `+91 ${formatPhoneForDisplay(phone)}` : phone;
+}

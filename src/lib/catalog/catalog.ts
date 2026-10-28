@@ -44,7 +44,8 @@ export interface ModelSpecs {
 
 /**
  * The design groups models under a family tab (NEXUS / MAGNUS / REO) and lists
- * the variants beneath it. Three families, four variants.
+ * the models beneath it. Three families, six models — two of them the
+ * Intellipack versions of the Nexus EX+ and Magnus GMax.
  */
 export const FAMILIES = [
   { code: 'nexus', name: 'Nexus' },
@@ -63,11 +64,27 @@ export interface Model {
   colours: Colour[];
   specs: ModelSpecs;
   /**
-   * Image basename under /public/models/. The component resolves
-   * `/models/<image>-<colour>.png`, falling back to `/models/<image>.png`,
-   * and renders a placeholder when neither exists.
+   * Photo folder under /public/models/. Each colour has its own run of angles,
+   * `/models/<image>/<colour>-<n>.webp` with n from 1 — see `angles` and
+   * photoSrc(). Two models may share a folder: the Intellipack Nexus is
+   * photographed as the Nexus EX+.
    */
   image: string;
+  /** How many angles each colour is photographed from, by colour code. */
+  angles: Readonly<Record<string, number>>;
+  /**
+   * Which versions of a scooter belong together. The Nexus EX+ and the Nexus
+   * EX+ Intellipack share a group; the variant layout shows the group as one
+   * card with `label` as its version chips. A scooter sold in one version is
+   * a group of one.
+   */
+  variant: { group: string; groupName: string; label: string };
+  /** Its page on ampere-electric.com. */
+  pageUrl: string;
+  /** What "Brochure" downloads: ours under /brochures, or the main site's leaflet. */
+  brochureUrl: string;
+  /** The offers strip on its card. PLACEHOLDER until Marketing sends one per scooter. */
+  offer: string;
   /**
    * Other names a link may use for this model — the slug of its page on
    * ampere-electric.com where that differs from the code. Lets the main site
@@ -118,9 +135,10 @@ export const REGIONS: readonly Region[] = [
 /*
  * Colours are per model, because they are. Names, order and hex values are
  * exactly those in each model's colour data on ampere-electric.com
- * (/nexus-ex-plus, /gmax, /magnus-neo, /reovyb), so a swatch here is the
- * swatch the customer just saw there. When the main site changes a colour,
- * change it here to match.
+ * (/nexus-ex-plus, /nexus-ex-plus-intellipack, /gmax, /new-magnus-gmax-iot,
+ * /magnus-neo, /reovyb), so a swatch here is the swatch the customer just saw
+ * there, and the angles are the photographs that page shows. When the main
+ * site changes a colour, change it here to match.
  */
 
 const CARBON_KNIGHT: Colour = { code: 'carbon-knight', name: 'Carbon Knight', hex: '#767876' };
@@ -130,6 +148,13 @@ const MATCHA_GREEN: Colour = {
   code: 'matcha-green',
   name: 'Matcha Green',
   hex: '#628C69',
+  hex2: '#EAE9D5',
+};
+// Only the Intellipack GMax comes in Monsoon Blue.
+const MONSOON_BLUE: Colour = {
+  code: 'monsoon-blue',
+  name: 'Monsoon Blue',
+  hex: '#465C78',
   hex2: '#EAE9D5',
 };
 const CINNAMON_COPPER: Colour = {
@@ -162,6 +187,12 @@ export function swatchBackground(colour: Pick<Colour, 'hex' | 'hex2'>): string {
     : colour.hex;
 }
 
+export const MAIN_SITE = 'https://ampere-electric.com';
+
+/** Offer copy until Marketing supplies one per scooter. */
+const PLACEHOLDER_OFFER =
+  'Benefits up to ₹5,000. Additional offers on Flipkart and Amazon. Visit the dealership to know more.';
+
 /**
  * Prices here are the published ex-showroom figures from each model page, used
  * only to seed `price_book`. At runtime every amount is resolved from the
@@ -176,41 +207,109 @@ export const MODELS: readonly Model[] = [
     colours: [CARBON_KNIGHT, STEEL_GREY],
     specs: { rangeKm: 136, topSpeedKmph: 93, chargeHours: 3.1 },
     image: 'nexus-ex-plus',
+    angles: { 'carbon-knight': 8, 'steel-grey': 8 },
+    variant: { group: 'nexus-ex-plus', groupName: 'Nexus EX+', label: 'Standard' },
+    pageUrl: `${MAIN_SITE}/nexus-ex-plus`,
+    brochureUrl: '/brochures/nexus-ex-plus.pdf',
+    offer: PLACEHOLDER_OFFER,
     aliases: ['nexus'],
+  },
+  {
+    code: 'nexus-ex-plus-intellipack',
+    family: 'nexus',
+    name: 'Nexus EX+ Intellipack',
+    sort: 2,
+    colours: [CARBON_KNIGHT, STEEL_GREY],
+    specs: { rangeKm: 136, topSpeedKmph: 93, chargeHours: 3.1 },
+    // Photographed as the Nexus EX+ — the main site uses the same pictures.
+    image: 'nexus-ex-plus',
+    angles: { 'carbon-knight': 8, 'steel-grey': 8 },
+    variant: { group: 'nexus-ex-plus', groupName: 'Nexus EX+', label: 'Intellipack' },
+    pageUrl: `${MAIN_SITE}/nexus-ex-plus-intellipack`,
+    brochureUrl: '/brochures/nexus-ex-plus.pdf',
+    offer: PLACEHOLDER_OFFER,
+    aliases: [],
   },
   {
     code: 'magnus-gmax',
     family: 'magnus',
     name: 'Magnus GMax',
-    sort: 2,
+    sort: 3,
     colours: [MATCHA_GREEN, CINNAMON_COPPER],
     specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: 5.45 },
     image: 'magnus-gmax',
+    angles: { 'matcha-green': 4, 'cinnamon-copper': 8 },
+    variant: { group: 'magnus-gmax', groupName: 'Magnus GMax', label: 'Standard' },
+    pageUrl: `${MAIN_SITE}/gmax`,
+    brochureUrl: '/brochures/magnus-gmax.pdf',
+    offer: PLACEHOLDER_OFFER,
     // ampere-electric.com/gmax
     aliases: ['gmax'],
+  },
+  {
+    code: 'magnus-gmax-intellipack',
+    family: 'magnus',
+    name: 'Magnus GMax Intellipack',
+    sort: 4,
+    colours: [MATCHA_GREEN, MONSOON_BLUE, CINNAMON_COPPER],
+    specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: 5.45 },
+    image: 'magnus-gmax-intellipack',
+    angles: { 'matcha-green': 7, 'monsoon-blue': 7, 'cinnamon-copper': 8 },
+    variant: { group: 'magnus-gmax', groupName: 'Magnus GMax', label: 'Intellipack' },
+    pageUrl: `${MAIN_SITE}/new-magnus-gmax-iot`,
+    brochureUrl: '/brochures/magnus-gmax.pdf',
+    offer: PLACEHOLDER_OFFER,
+    // ampere-electric.com/new-magnus-gmax-iot
+    aliases: ['new-magnus-gmax-iot', 'magnus-gmax-iot'],
   },
   {
     code: 'magnus-neo',
     family: 'magnus',
     name: 'Magnus Neo',
-    sort: 3,
+    sort: 5,
     colours: [OCEAN_BLUE, TURMERIC_LATTE, MISTY_MAUVE],
     specs: { rangeKm: 125, topSpeedKmph: 60, chargeHours: 5 },
     image: 'magnus-neo',
+    angles: { 'ocean-blue': 5, 'turmeric-latte': 5, 'misty-mauve': 5 },
+    variant: { group: 'magnus-neo', groupName: 'Magnus Neo', label: 'Standard' },
+    pageUrl: `${MAIN_SITE}/magnus-neo`,
+    brochureUrl: '/brochures/magnus-neo.pdf',
+    offer: PLACEHOLDER_OFFER,
     aliases: [],
   },
   {
     code: 'reo-vyb',
     family: 'reo',
     name: 'Reo VYB',
-    sort: 4,
+    sort: 6,
     colours: [PASTEL_PURPLE, AQUA_METALLIC, DARK_GREY],
     specs: { rangeKm: 80, topSpeedKmph: 25, chargeHours: 4 },
     image: 'reo-vyb',
+    angles: { 'pastel-purple': 8, 'aqua-metallic': 7, 'dark-grey': 8 },
+    variant: { group: 'reo-vyb', groupName: 'Reo VYB', label: 'Standard' },
+    pageUrl: `${MAIN_SITE}/reovyb`,
+    // No brochure of our own yet; the main site's leaflet until one arrives.
+    brochureUrl: `${MAIN_SITE}/storage/downloadables/reo-vyb-leaflet.pdf`,
+    offer: PLACEHOLDER_OFFER,
     // ampere-electric.com/reovyb
     aliases: ['reovyb'],
   },
 ] as const;
+
+/** The photograph of one colour from one angle. `angle` counts from 0. */
+export function photoSrc(model: Model, colourCode: string, angle = 0): string {
+  return `/models/${model.image}/${colourCode}-${angle + 1}.webp`;
+}
+
+/** How many angles a colour has been photographed from; at least one. */
+export function angleCount(model: Model, colourCode: string | null | undefined): number {
+  return Math.max(1, (colourCode && model.angles[colourCode]) || 1);
+}
+
+/** The versions of one scooter, Standard first. */
+export function modelsInGroup(group: string): Model[] {
+  return MODELS.filter((m) => m.variant.group === group).sort((a, b) => a.sort - b.sort);
+}
 
 /* ------------------------------------------------------------------ */
 /* Lookups                                                             */

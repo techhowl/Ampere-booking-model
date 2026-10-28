@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
+import { env } from '@/lib/env';
 import { requireJourney, writeSession } from '@/lib/http/session';
 import { createOrderSchema } from '@/lib/schemas/order';
 import { createOrder, OrderError } from '@/lib/orders/create-order';
@@ -23,6 +24,14 @@ export const dynamic = 'force-dynamic';
 const ROUTE = 'POST /api/orders';
 
 export async function POST(request: NextRequest) {
+  // Buy Now is switched off for launch; see env.buyNowEnabled.
+  if (!env.buyNowEnabled) {
+    return NextResponse.json(
+      { error: 'buy_disabled', message: 'Online booking is not available yet. Book a test ride instead.' },
+      { status: 403 },
+    );
+  }
+
   // A live, verified journey — see lib/http/session.ts.
   const gate = requireJourney(request);
   if (!gate.ok) return gate.response;
