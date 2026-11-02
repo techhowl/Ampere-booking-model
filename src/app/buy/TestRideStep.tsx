@@ -218,8 +218,10 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
                 selected={window.code === slot}
                 disabled={!window.available}
                 onClick={() => setSlot(window.code)}
-                // One line even on a narrow phone: the 12-hour labels are long.
-                className="whitespace-nowrap rounded-xl px-1.5 text-[12px] sm:px-4 sm:text-[14px]"
+                // One line even on a narrow phone: "01:00 PM - 03:00 PM", the
+                // CRM's own format, is long. Marked important because Pill's
+                // own px-5 text-[14px] would otherwise win the cascade.
+                className="whitespace-nowrap rounded-xl px-1! text-[12px]! tracking-tight sm:px-4! sm:text-[14px]! sm:tracking-normal"
               >
                 {window.label}
               </Pill>

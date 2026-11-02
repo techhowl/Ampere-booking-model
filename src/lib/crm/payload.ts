@@ -55,24 +55,15 @@ export function crmDate(slotDate: Date): string {
   return `${dd}/${mm}/${slotDate.getUTCFullYear()}`;
 }
 
-function clock(minutesOfDay: number): string {
-  const hours = Math.floor(minutesOfDay / 60);
-  const minutes = minutesOfDay % 60;
-  const twelve = hours % 12 === 0 ? 12 : hours % 12;
-  return `${String(twelve).padStart(2, '0')}:${String(minutes).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
-}
-
 /**
- * "01:00 PM - 03:00 PM": Greaves' "hh:mm AM/PM - hh:mm AM/PM", plain hyphen.
- *
- * The page shows "1:00 PM – 3:00 PM". The sandbox reads either correctly, but
- * it stores the text exactly as sent, so the CRM's own spelling is the one
- * that keeps their reports consistent.
+ * "01:00 PM - 03:00 PM": the slot exactly as the customer saw it. The page's
+ * labels are written in Greaves' own format (see slots.ts), and the CRM
+ * stores the text verbatim, so it is sent unchanged.
  */
 export function crmTimeSlot(windowCode: string): string {
   const window = getSlotWindow(windowCode);
   if (!window) throw new Error(`Unknown slot window: ${windowCode}`);
-  return `${clock(window.startMinutes)} - ${clock(window.endMinutes)}`;
+  return window.label;
 }
 
 /** The instant the slot starts. The CRM stores this as Test_Ride_Date_Time. */

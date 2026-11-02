@@ -69,7 +69,7 @@ raw response text. The sandbox accepts string ids.
 | Test ride, new mobile | `New Lead and Test Ride created` |
 | Unknown `Zoho_CRM_Lead_ID` | `rule_failure: Provided Zoho CRM Lead ID is not available` → we drop the id and resend |
 | **Same test ride sent twice** | **Two test rides.** No idempotency. See "Retries" below. |
-| Time slot `01:00 PM - 03:00 PM`, `1:00 PM - 3:00 PM`, `1:00 PM – 3:00 PM` | All stored 13:00 IST. `Time_Slot` is stored verbatim, so we send `hh:mm AM - hh:mm PM`. |
+| Time slot `01:00 PM - 03:00 PM`, `1:00 PM - 3:00 PM`, `1:00 PM – 3:00 PM` | All stored 13:00 IST. `Time_Slot` is stored verbatim, so the page itself uses Greaves' `hh:mm AM - hh:mm PM`. |
 | Date not `dd/MM/yyyy` | `Mandatory fields are missing` (misleading) |
 | Vehicle missing on a test ride | `Mandatory fields are missing` |
 | **Suspended dealer** (e.g. "Asha Ampere", the PDF's own example) | `api_failure: Lead creation failed due to technical reasons` |
@@ -95,7 +95,7 @@ raw response text. The sandbox accepts string ids.
 | `Website_Lead_ID` | our lead UUID |
 | `Test_Ride_Location` | `Dealer` (`Home` if home rides return) |
 | `Test_Ride_Date_Time` | `dd/MM/yyyy` |
-| `Time_Slot` | `10:00 AM - 12:00 PM`, `01:00 PM - 03:00 PM`, `03:00 PM - 05:00 PM`, `05:00 PM - 08:00 PM` |
+| `Time_Slot` | the slot exactly as the page shows it: `10:00 AM - 12:00 PM`, `01:00 PM - 03:00 PM`, `03:00 PM - 05:00 PM`, `05:00 PM - 08:00 PM` |
 | `Zoho_CRM_Lead_ID` | the CRM lead id we hold, else empty |
 
 Ids differ between sandbox and production, so they are **data, not code**:

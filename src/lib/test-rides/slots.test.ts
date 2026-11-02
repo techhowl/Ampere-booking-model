@@ -45,11 +45,23 @@ describe('the rolling window', () => {
       expect(day.windows.map((w) => w.code)).toEqual(['w1', 'w2', 'w3', 'w4']);
     }
     expect(SLOT_WINDOWS.map((w) => w.label)).toEqual([
-      '10:00 AM – 12:00 PM',
-      '1:00 PM – 3:00 PM',
-      '3:00 PM – 5:00 PM',
-      '5:00 PM – 8:00 PM',
+      '10:00 AM - 12:00 PM',
+      '01:00 PM - 03:00 PM',
+      '03:00 PM - 05:00 PM',
+      '05:00 PM - 08:00 PM',
     ]);
+  });
+
+  it('labels every window in Greaves’ "hh:mm AM/PM - hh:mm AM/PM", true to its times', () => {
+    const clock = (minutes: number) => {
+      const hours = Math.floor(minutes / 60);
+      const twelve = hours % 12 === 0 ? 12 : hours % 12;
+      return `${String(twelve).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
+    };
+    for (const w of SLOT_WINDOWS) {
+      expect(w.label).toMatch(/^\d{2}:\d{2} (AM|PM) - \d{2}:\d{2} (AM|PM)$/);
+      expect(w.label).toBe(`${clock(w.startMinutes)} - ${clock(w.endMinutes)}`);
+    }
   });
 });
 
@@ -177,11 +189,11 @@ describe('parseSlotDate', () => {
 describe('describeSlot', () => {
   it('reads the way a confirmation should', () => {
     const date = parseSlotDate('2026-10-06') as Date;
-    expect(describeSlot(date, 'w2', MORNING)).toBe('Tomorrow, 1:00 PM – 3:00 PM');
+    expect(describeSlot(date, 'w2', MORNING)).toBe('Tomorrow, 01:00 PM - 03:00 PM');
   });
 
   it('names a distant day', () => {
     const date = parseSlotDate('2026-10-09') as Date;
-    expect(describeSlot(date, 'w4', MORNING)).toBe('Fri 9 Oct, 5:00 PM – 8:00 PM');
+    expect(describeSlot(date, 'w4', MORNING)).toBe('Fri 9 Oct, 05:00 PM - 08:00 PM');
   });
 });
