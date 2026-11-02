@@ -243,6 +243,24 @@ describe('returning to a half-finished attempt', () => {
     expect(lead.phoneLast4).toBe('6780');
   });
 
+  it('forgets the CRM lead when the number changes — it belongs to the old number', async () => {
+    const first = await saveLead(prisma, identity(), CONTEXT);
+    await prisma.lead.update({
+      where: { id: first.response.leadId },
+      data: { phoneVerified: true, crmLeadId: '1456765000001735362' },
+    });
+
+    // The same number again keeps it…
+    await saveLead(prisma, identity(), { ...CONTEXT, existingLeadId: first.response.leadId });
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: first.response.leadId } })).crmLeadId).toBe(
+      '1456765000001735362',
+    );
+
+    // …a different one does not.
+    await saveLead(prisma, identity({ phone: '9123456780' }), { ...CONTEXT, existingLeadId: first.response.leadId });
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: first.response.leadId } })).crmLeadId).toBeNull();
+  });
+
   it('starts a fresh lead when the cookie points at a row that is gone', async () => {
     const { created } = await saveLead(prisma, identity(), {
       ...CONTEXT,

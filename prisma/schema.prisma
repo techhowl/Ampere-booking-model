@@ -62,13 +62,17 @@ model Lead {
   fbclid        String?
   /// Full original query string, whatever we managed to parse from it.
   sourceRaw     Json?      @map("source_raw")
+  /// This customer's lead in Greaves CRM.Next (Zoho), once the CRM sync has
+  /// one. Zoho ids overflow a JavaScript number, so they are always text.
+  crmLeadId     String?    @map("crm_lead_id")
   createdAt     DateTime   @default(now()) @map("created_at")
   updatedAt     DateTime   @updatedAt @map("updated_at")
 
-  dealer    Dealer?     @relation(fields: [dealerCode], references: [dealerCode])
+  dealer    Dealer?    @relation(fields: [dealerCode], references: [dealerCode])
   consents  Consent[]
   orders    Order[]
   testRides TestRide[]
+  crmJobs   CrmJob[]
 
   @@index([phoneHash])
   @@index([phoneVerified, createdAt(sort: Desc)])
@@ -95,15 +99,15 @@ model Consent {
 }
 
 model OtpAttempt {
-  otpRef    String    @id @map("otp_ref")
-  phoneHash String    @map("phone_hash") @db.Char(64)
-  codeHash  String    @map("code_hash")
-  channel   String    @default("sms")
-  attempts  Int       @default(0)
+  otpRef     String    @id @map("otp_ref")
+  phoneHash  String    @map("phone_hash") @db.Char(64)
+  codeHash   String    @map("code_hash")
+  channel    String    @default("sms")
+  attempts   Int       @default(0)
   verifiedAt DateTime? @map("verified_at")
-  expiresAt DateTime  @map("expires_at")
-  ip        String?
-  createdAt DateTime  @default(now()) @map("created_at")
+  expiresAt  DateTime  @map("expires_at")
+  ip         String?
+  createdAt  DateTime  @default(now()) @map("created_at")
 
   @@index([phoneHash, createdAt])
   @@index([expiresAt])
@@ -211,23 +215,29 @@ model PaymentEvent {
 }
 
 model TestRide {
-  id         String   @id @default(uuid()) @db.Uuid
-  leadId     String   @map("lead_id") @db.Uuid
-  dealerCode String   @map("dealer_code")
-  modelCode  String   @map("model_code")
-  colourCode String?  @map("colour_code")
-  mode       String // "home" | "dealer"
-  slotDate   DateTime @map("slot_date") @db.Date
-  slotWindow String   @map("slot_window") // w1..w4
+  id            String   @id @default(uuid()) @db.Uuid
+  leadId        String   @map("lead_id") @db.Uuid
+  dealerCode    String   @map("dealer_code")
+  modelCode     String   @map("model_code")
+  colourCode    String?  @map("colour_code")
+  mode          String // "home" | "dealer"
+  slotDate      DateTime @map("slot_date") @db.Date
+  slotWindow    String   @map("slot_window") // w1..w4
   /// "offers" | "financing" | "specs" | null — the help topic the customer
   /// picked. Journey document section 03: this intent signal is collected today
   /// and acted on by nobody. Picking "financing" opens the EMI widget.
-  helpTopic  String?  @map("help_topic")
-  status     String   @default("booked")
-  createdAt  DateTime @default(now()) @map("created_at")
+  helpTopic     String?  @map("help_topic")
+  /// Every topic the customer ticked; helpTopic is only the first. The CRM
+  /// takes them all, comma-separated.
+  helpTopics    String[] @default([]) @map("help_topics")
+  status        String   @default("booked")
+  /// The matching Test Ride in Greaves CRM.Next, once the CRM sync has one.
+  crmTestRideId String?  @map("crm_test_ride_id")
+  createdAt     DateTime @default(now()) @map("created_at")
 
-  lead   Lead   @relation(fields: [leadId], references: [id])
-  dealer Dealer @relation(fields: [dealerCode], references: [dealerCode])
+  lead    Lead     @relation(fields: [leadId], references: [id])
+  dealer  Dealer   @relation(fields: [dealerCode], references: [dealerCode])
+  crmJobs CrmJob[]
 
   @@index([dealerCode, slotDate])
   @@map("test_ride_bookings")
@@ -242,6 +252,9 @@ model Dealer {
   lng             Float?
   homeServiceable Boolean @default(false) @map("home_serviceable")
   active          Boolean @default(true)
+  /// This dealer's Account id in Greaves CRM.Next. Different in sandbox and
+  /// production, so it is data per environment, never code.
+  crmId           String? @map("crm_id")
 
   leads      Lead[]
   orders     Order[]
@@ -343,4 +356,91 @@ model RateLimit {
   @@id([scope, kind, subject])
   @@index([windowStart])
   @@map("rate_limits")
+}
+
+/**
+ * ------------------------------------------------------------------
+ */
+/**
+ * Greaves CRM.Next (Zoho CRM) — see docs/greaves-crm/
+ */
+/**
+ * ------------------------------------------------------------------
+ */
+
+/// Our model code -> the Vehicle_Models record id in Greaves' CRM.
+///
+/// Per environment, like Dealer.crmId: the sandbox and production CRMs give
+/// the same scooter different ids. Filled by `pnpm crm sync-models`, which
+/// reads them from the CRM itself.
+model CrmVehicleModel {
+  modelCode String   @id @map("model_code")
+  crmId     String   @map("crm_id")
+  /// The CRM's own name for it, kept to make a wrong match visible.
+  crmName   String   @map("crm_name")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("crm_vehicle_models")
+}
+
+/// One thing to deliver to the CRM: a verified lead, or a booked test ride.
+///
+/// The customer never waits on this. A job is written in the request, sent
+/// after the response has gone, and retried with backoff until the CRM gives a
+/// final answer. A request that dies between saving the booking and writing
+/// the job is caught by the reconcile pass in the sync cron.
+model CrmJob {
+  id            String    @id @default(uuid()) @db.Uuid
+  /// "lead" | "test_ride"
+  kind          String
+  /// Exactly one job per lead-and-number, and per test ride. Enqueueing twice
+  /// is a no-op: "lead:<leadId>:<phoneHash>" or "test_ride:<testRideId>".
+  dedupeKey     String    @unique @map("dedupe_key")
+  leadId        String    @map("lead_id") @db.Uuid
+  testRideId    String?   @map("test_ride_id") @db.Uuid
+  /// Lead jobs only: the number this job is about. If the customer changes
+  /// their number before it is sent, the job no longer applies.
+  phoneHash     String?   @map("phone_hash") @db.Char(64)
+  /// "pending" | "processing" | "done" | "dead"
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
+  /// A worker's claim. Expires, so a worker killed mid-send does not strand it.
+  lockedUntil   DateTime? @map("locked_until")
+  /// The last attempt may have reached the CRM without us hearing back (a
+  /// timeout). The CRM has no idempotency, so a test ride is looked up before
+  /// it is sent again.
+  ambiguous     Boolean   @default(false)
+  /// What the CRM said: "created", "duplicate", "linked", "recovered", ...
+  outcome       String?
+  /// The CRM's category and message, or the transport failure. Never payload.
+  lastError     String?   @map("last_error")
+  crmLeadId     String?   @map("crm_lead_id")
+  crmTestRideId String?   @map("crm_test_ride_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+
+  lead     Lead      @relation(fields: [leadId], references: [id])
+  testRide TestRide? @relation(fields: [testRideId], references: [id])
+
+  @@index([status, nextAttemptAt])
+  @@index([leadId])
+  @@map("crm_jobs")
+}
+
+/// Zoho access tokens, shared by every instance of the app.
+///
+/// Zoho rate-limits token generation, and asks for a token to be reused for
+/// ~55 minutes. In-process memory is not enough on serverless, where every
+/// cold start would mint a new one. Encrypted with a key derived from the
+/// client secret, which never leaves the environment.
+model CrmToken {
+  /// "zoho:<api host>:<client id>" — sandbox and production never share a row.
+  key       String   @id
+  tokenEnc  Bytes    @map("token_enc")
+  expiresAt DateTime @map("expires_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("crm_tokens")
 }

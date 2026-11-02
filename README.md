@@ -98,6 +98,11 @@ for open items 2, 4 and 5.
 Off by default: launch is test rides only, and the order route refuses while
 it is off. Photos and brochures: `public/models/README.md`, `public/brochures/`.
 
+`CRM_PROVIDER=zoho` sends every verified lead and booked test ride to Greaves
+CRM.Next (Zoho), in the background, with retries. The sandbox is used everywhere
+except production, and the app refuses to start otherwise. Setup, what the
+sandbox actually does, and `pnpm crm …`: `docs/greaves-crm/README.md`.
+
 ---
 
 ## Local setup
@@ -313,3 +318,6 @@ Blocked on a decision: the partial payment amount — the mechanism is built reg
 - **Consent is captured at step one**, under the phone field, with two separate
   purposes. Storing an unverified number is fine; contacting that person later
   is what needs consent.
+- **Only verified numbers go to Greaves' CRM**, and the customer never waits
+  on it. The CRM has no idempotency: a test ride that may have landed is
+  looked up before it is sent again. `docs/greaves-crm/README.md`.

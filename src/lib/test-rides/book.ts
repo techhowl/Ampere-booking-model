@@ -49,6 +49,7 @@ export interface BookingSuccess {
   modelName: string;
   colourCode: string | null;
   helpTopic: string | null;
+  helpTopics: string[];
   /** False when the dealer could not be reached; the booking still stands. */
   dealerNotified: boolean;
 }
@@ -62,8 +63,10 @@ export interface BookTestRideInput {
   mode: TestRideMode;
   slotDate: string;
   slotWindow: string;
-  /** "offers" | "financing" | "specs". Drives the post-booking follow-up. */
+  /** "offers" | "brochure" | ... — the first one ticked. */
   helpTopic?: string | null;
+  /** Every topic ticked. Wins over helpTopic when both are sent. */
+  helpTopics?: string[];
 }
 
 export async function bookTestRide(
@@ -105,6 +108,12 @@ export async function bookTestRide(
       ? input.colourCode
       : null;
 
+  // An older page sends only helpTopic; a current one sends the full list.
+  const helpTopics = [
+    ...new Set(input.helpTopics?.length ? input.helpTopics : input.helpTopic ? [input.helpTopic] : []),
+  ];
+  const helpTopic = helpTopics[0] ?? null;
+
   // A double-tap that slipped past the idempotency key would otherwise put two
   // identical rides on one dealer's sheet.
   const existing = await prisma.testRide.findFirst({
@@ -127,7 +136,8 @@ export async function bookTestRide(
         mode,
         slotDate: slot.date,
         slotWindow: slot.window.code,
-        helpTopic: input.helpTopic ?? null,
+        helpTopic,
+        helpTopics,
         status: 'booked',
       },
     }));
@@ -190,7 +200,8 @@ export async function bookTestRide(
       modelCode: model.code,
       modelName: model.name,
       colourCode,
-      helpTopic: input.helpTopic ?? null,
+      helpTopic: booking.helpTopic,
+      helpTopics: booking.helpTopics,
       dealerNotified,
     },
   };

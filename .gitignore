@@ -55,3 +55,9 @@ assets/design/
 
 # Superseded handover drafts
 docs/handover/*(v[0-9]).docx
+
+# Greaves' Postman collection: it carries the Zoho client secret. The values
+# live in .env / the host's environment; this file must never be committed.
+Sandbox - Lead Creation API Collection for Website.json
+*.postman_collection.json
+Greaves CRM.Next -Website Lead APIs.pdf

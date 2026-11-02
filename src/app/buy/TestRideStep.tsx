@@ -105,9 +105,10 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
           mode: 'dealer',
           slotDate: date,
           slotWindow: slot,
-          // The schema takes one topic; send the first chosen. Multi-select is
-          // the design's shape and the column holds a single value today.
+          // Every topic ticked goes to the dealer's CRM. helpTopic stays for
+          // the server's older readers.
           helpTopic: topics[0] ?? null,
+          helpTopics: topics,
         }),
       });
 

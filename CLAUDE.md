@@ -6,6 +6,7 @@ Deploys to `buy.ampere-electric.com` — a DigitalOcean droplet, separate from t
 
 Full spec: `docs/build-spec.md`. Read it before starting anything non-trivial.
 Juspay's own integration doc and what it changes: `docs/juspay/`.
+Greaves CRM.Next (Zoho) — what the sandbox really does: `docs/greaves-crm/`.
 
 ## Commands
 
@@ -72,7 +73,12 @@ test ride. Model is preselected when they arrive from a product page.
 `FakeJuspayClient` drives development and the whole test suite. Juspay
 credentials have not arrived yet. Build and test the complete payment flow —
 including reconciliation — against the fake. Do not block on real access.
-Same pattern for SMS, WhatsApp, and the dealer management system.
+Same pattern for SMS and WhatsApp.
+
+Greaves CRM.Next (the dealer management system) is live in **sandbox**:
+`CRM_PROVIDER=zoho`, with `FakeCrmClient` for tests. Production credentials
+come after Greaves' go-live approval. Zoho ids are per environment — data in
+`crm_vehicle_models` and `dealers.crm_id`, never in code.
 
 ## Known unknowns — ask before assuming
 

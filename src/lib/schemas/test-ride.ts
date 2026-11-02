@@ -35,7 +35,10 @@ export const testRideSchema = z.object({
   /** "2026-10-06". Re-checked server-side against the window we actually offered. */
   slotDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Pick a date'),
   slotWindow: z.enum(SLOT_WINDOW_CODES as [string, ...string[]]),
+  /** The first topic ticked. Kept so a page loaded before this change still books. */
   helpTopic: z.enum(HELP_TOPICS).nullable().optional(),
+  /** Every topic ticked — the CRM takes them all. */
+  helpTopics: z.array(z.enum(HELP_TOPICS)).max(HELP_TOPICS.length).optional(),
 });
 
 export type TestRideInput = z.infer<typeof testRideSchema>;

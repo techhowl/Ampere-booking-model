@@ -309,3 +309,27 @@ describe('a repeated booking of the same slot', () => {
     expect(await prisma.testRide.count()).toBe(2);
   });
 });
+
+describe('help topics', () => {
+  it('keeps every topic ticked, for the CRM', async () => {
+    const result = await bookTestRide(prisma, notifier, input({ helpTopics: ['offers', 'brochure'] }), NOW);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.booking.helpTopics).toEqual(['offers', 'brochure']);
+    expect(result.booking.helpTopic).toBe('offers');
+    const stored = await prisma.testRide.findUniqueOrThrow({ where: { id: result.booking.bookingId } });
+    expect(stored).toMatchObject({ helpTopic: 'offers', helpTopics: ['offers', 'brochure'] });
+  });
+
+  it('still books from a page that sends only the first topic', async () => {
+    const result = await bookTestRide(prisma, notifier, input({ helpTopic: 'brochure' }), NOW);
+    expect(result.ok && result.booking.helpTopics).toEqual(['brochure']);
+  });
+
+  it('stores nothing when nothing was ticked', async () => {
+    const result = await bookTestRide(prisma, notifier, input(), NOW);
+    expect(result.ok && result.booking.helpTopics).toEqual([]);
+    expect(result.ok && result.booking.helpTopic).toBeNull();
+  });
+});

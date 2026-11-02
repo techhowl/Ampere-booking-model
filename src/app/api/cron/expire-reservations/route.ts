@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { timingSafeEqual } from 'node:crypto';
 import { ReservationStatus } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { expireStale } from '@/lib/inventory/inventory';
 import { getJuspayClient } from '@/lib/juspay/client';
+import { cronAuthorised } from '@/lib/http/cron-auth';
 
 /**
  * POST /api/cron/expire-reservations
@@ -27,21 +27,6 @@ import { getJuspayClient } from '@/lib/juspay/client';
 
 export const dynamic = 'force-dynamic';
 
-function authorised(request: NextRequest): boolean {
-  const expected = process.env.CRON_SECRET;
-  // Unset means closed, never open. A scheduler endpoint that falls open when
-  // a variable is missing is a free denial-of-inventory button.
-  if (!expected) return false;
-
-  const header = request.headers.get('authorization');
-  if (!header?.startsWith('Bearer ')) return false;
-
-  const a = Buffer.from(header.slice(7));
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
 /**
  * Vercel Cron calls with GET and the same `Authorization: Bearer CRON_SECRET`
  * header, so the UAT copy on Vercel needs no other scheduler.
@@ -51,7 +36,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!authorised(request)) {
+  if (!cronAuthorised(request)) {
     return NextResponse.json({ error: 'unauthorised' }, { status: 401 });
   }
 

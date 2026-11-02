@@ -5,6 +5,7 @@ import { testRideSchema } from '@/lib/schemas/test-ride';
 import { bookTestRide } from '@/lib/test-rides/book';
 import { offeredDays } from '@/lib/test-rides/slots';
 import { getDealerNotifier } from '@/lib/notifications/dealer';
+import { queueTestRideSync } from '@/lib/crm/schedule';
 import {
   IDEMPOTENCY_HEADER,
   IdempotencyInFlightError,
@@ -22,6 +23,8 @@ import {
  */
 
 export const dynamic = 'force-dynamic';
+/** The CRM send runs after the response, inside this function's time. */
+export const maxDuration = 60;
 
 const ROUTE = 'POST /api/test-rides';
 
@@ -93,6 +96,13 @@ export async function POST(request: NextRequest) {
         };
       },
     });
+
+    // To Greaves' CRM, after the response. Queueing is idempotent per booking,
+    // so an idempotent replay of this request queues nothing new.
+    if (statusCode === 201) {
+      const { bookingId } = body as { bookingId: string };
+      await queueTestRideSync(bookingId);
+    }
 
     return writeSession(NextResponse.json(body, { status: statusCode }), session);
   } catch (error) {

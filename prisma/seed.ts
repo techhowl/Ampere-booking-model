@@ -158,6 +158,53 @@ const DEALERS: SeedDealer[] = [
 ];
 
 /* ------------------------------------------------------------------ */
+/* Greaves CRM ids - SANDBOX ONLY                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Sandbox record ids, read from Greaves' sandbox CRM on 2026-11-02, so a
+ * seeded database can send real test rides there end to end.
+ *
+ * The placeholder dealers do not exist in the CRM, so each borrows an ACTIVE
+ * sandbox dealer: a test ride sent with a suspended dealer, or with none for
+ * a pincode the sandbox does not serve, fails inside Greaves' function.
+ *
+ * Production never runs this seed. Its vehicle ids come from
+ * `pnpm crm sync-models`, its dealer ids with the real dealer master.
+ */
+const SANDBOX_DEALER_CRM_IDS: Record<string, string> = {
+  'AMP-N-001': '1456765000001717145', // GL Futuride, Delhi
+  'AMP-N-002': '1456765000001717145',
+  'AMP-W-001': '1456765000001717135', // Shivam Ev, Rajkot
+  'AMP-W-002': '1456765000001717135',
+  'AMP-S-001': '1456765000001717131', // RG Motors, Bengaluru
+  'AMP-S-003': '1456765000001717131',
+  'AMP-S-004': '1456765000001717131',
+  'AMP-S-005': '1456765000001717131',
+  'AMP-S-002': '1456765000001717144', // Jeyas Electric Bikes, Tamil Nadu
+  'AMP-E-001': '1456765000001717150', // New Sarathi Motors, Kolkata
+  'AMP-E-002': '1456765000001717147', // Parbati Auto, Odisha
+};
+
+/**
+ * Sandbox ids only where the sandbox is the CRM. deploy/README.md runs this
+ * seed on the production droplet, and there these ids would point the live
+ * CRM at records that do not exist in it.
+ */
+const SEED_SANDBOX_CRM_IDS =
+  process.env.APP_ENV !== 'production' &&
+  (!process.env.ZOHO_API_URL || /^https:\/\/sandbox\./i.test(process.env.ZOHO_API_URL));
+
+const SANDBOX_VEHICLE_MODELS: { modelCode: string; crmId: string; crmName: string }[] = [
+  { modelCode: 'nexus-ex-plus', crmId: '1456765000001702028', crmName: 'Nexus EX+' },
+  { modelCode: 'nexus-ex-plus-intellipack', crmId: '1456765000001702029', crmName: 'Nexus EX+ (INTELLIPACK)' },
+  { modelCode: 'magnus-gmax', crmId: '1456765000001702030', crmName: 'Magnus GMAX' },
+  { modelCode: 'magnus-gmax-intellipack', crmId: '1456765000001702031', crmName: 'Magnus GMAX (INTELLIPACK)' },
+  { modelCode: 'magnus-neo', crmId: '1456765000001702032', crmName: 'Magnus Neo' },
+  { modelCode: 'reo-vyb', crmId: '1456765000001702033', crmName: 'Reo VYB' },
+];
+
+/* ------------------------------------------------------------------ */
 /* Pincodes - PLACEHOLDER                                              */
 /* ------------------------------------------------------------------ */
 
@@ -249,8 +296,23 @@ async function seedDealers(): Promise<number> {
       create: { ...d, active: true },
       update: { ...d, active: true },
     });
+    // Filled only where empty: a link made with `pnpm crm link-dealer`, or
+    // from the real dealer master, is never overwritten by a placeholder.
+    const crmId = SANDBOX_DEALER_CRM_IDS[d.dealerCode];
+    if (SEED_SANDBOX_CRM_IDS && crmId) {
+      await prisma.dealer.updateMany({ where: { dealerCode: d.dealerCode, crmId: null }, data: { crmId } });
+    }
   }
   return DEALERS.length;
+}
+
+async function seedCrmVehicleModels(): Promise<number> {
+  if (!SEED_SANDBOX_CRM_IDS) return 0;
+  for (const v of SANDBOX_VEHICLE_MODELS) {
+    // Create only: ids read from the CRM by `pnpm crm sync-models` stand.
+    await prisma.crmVehicleModel.upsert({ where: { modelCode: v.modelCode }, create: v, update: {} });
+  }
+  return SANDBOX_VEHICLE_MODELS.length;
 }
 
 async function seedPincodes(): Promise<number> {
@@ -383,6 +445,13 @@ async function main(): Promise<void> {
 
   const pincodes = await seedPincodes();
   console.log(`  pincodes     ${pincodes}`);
+
+  const vehicles = await seedCrmVehicleModels();
+  console.log(
+    SEED_SANDBOX_CRM_IDS
+      ? `  crm models   ${vehicles}  (Greaves SANDBOX ids)`
+      : '  crm ids      skipped: production or live CRM — run pnpm crm sync-models',
+  );
 
   const prices = await seedPriceBook();
   console.log(`  price_book   ${prices}  (${MODELS.length} models x ${REGIONS.length} regions)`);

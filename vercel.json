@@ -3,5 +3,8 @@
   "framework": "nextjs",
   "buildCommand": "pnpm exec prisma generate && pnpm build",
   "regions": ["bom1"],
-  "crons": [{ "path": "/api/cron/expire-reservations", "schedule": "30 2 * * *" }]
+  "crons": [
+    { "path": "/api/cron/expire-reservations", "schedule": "30 2 * * *" },
+    { "path": "/api/cron/crm-sync", "schedule": "0 3 * * *" }
+  ]
 }

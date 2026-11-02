@@ -110,9 +110,13 @@ env file:
 
 ```cron
 * * * * * curl -fsS -X POST https://buy.ampere-electric.com/api/cron/expire-reservations -H "Authorization: Bearer YOUR_CRON_SECRET" >/dev/null 2>&1
+* * * * * curl -fsS -X POST https://buy.ampere-electric.com/api/cron/crm-sync -H "Authorization: Bearer YOUR_CRON_SECRET" >/dev/null 2>&1
 ```
 
-Every minute. The endpoint is idempotent and cheap when there is nothing to do.
+Every minute. Both endpoints are idempotent and cheap when there is nothing to
+do. The second retries anything Greaves' CRM did not take first time, and
+queues any lead or booking that never got a job — without it, a CRM outage
+leaves leads waiting until the next customer happens along.
 
 ---
 

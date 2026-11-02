@@ -89,7 +89,9 @@ export async function saveLead(
     const numberChanged = existing.phoneHash !== phone.phoneHash;
     await prisma.lead.update({
       where: { id: existing.id },
-      data: numberChanged ? { ...common, phoneVerified: false } : common,
+      // The CRM lead belongs to the old number too: the CRM matches customers
+      // by mobile. Kept, the new number would be filed under the old one's.
+      data: numberChanged ? { ...common, phoneVerified: false, crmLeadId: null } : common,
     });
     leadId = existing.id;
     created = false;

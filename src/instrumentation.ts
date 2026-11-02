@@ -59,9 +59,18 @@ const KNOWN_VARS = [
   'JUSPAY_WEBHOOK_URL',
   'JUSPAY_BASE_URL',
   'JUSPAY_RECEIPT_DOMAIN',
+  'CRM_PROVIDER',
+  'ZOHO_ACCOUNTS_URL',
+  'ZOHO_API_URL',
+  'ZOHO_CLIENT_ID',
+  'ZOHO_CLIENT_SECRET',
+  'ZOHO_REFRESH_TOKEN',
+  'ZOHO_LEAD_FUNCTION',
+  'ZOHO_TEST_RIDE_FUNCTION',
+  'ZOHO_TIMEOUT_MS',
 ] as const;
 
-export function register(): void {
+export async function register(): Promise<void> {
   const offenders = KNOWN_VARS.filter((name) => quoted(process.env[name]));
 
   if (offenders.length > 0) {
@@ -78,9 +87,25 @@ export function register(): void {
   const otpEcho = process.env.OTP_ECHO_ENABLED === 'true';
   const buyNow = process.env.BUY_NOW_ENABLED === 'true';
 
+  /*
+   * The CRM rules, checked now rather than on the first lead: a missing
+   * credential, or production pointed at the sandbox (or UAT at the live
+   * CRM), refuses to start. See lib/crm/config.ts.
+   */
+  const { crmSettings } = await import('./lib/crm/config');
+  const crm = crmSettings();
+  const crmLabel = crm.provider === 'zoho' ? (crm.sandbox ? 'zoho-SANDBOX' : 'zoho-LIVE') : 'fake';
+
   console.info(
-    `[startup] APP_ENV=${appEnv} juspay=${juspayLive ? 'REAL' : 'fake'} otpEcho=${otpEcho ? 'ON' : 'off'} buyNow=${buyNow ? 'ON' : 'off'}`,
+    `[startup] APP_ENV=${appEnv} juspay=${juspayLive ? 'REAL' : 'fake'} otpEcho=${otpEcho ? 'ON' : 'off'} buyNow=${buyNow ? 'ON' : 'off'} crm=${crmLabel}`,
   );
+
+  if (crm.provider === 'fake' && (process.env.APP_ENV ?? 'production') === 'production') {
+    console.warn(
+      '[startup] WARNING: production is running without Greaves CRM.Next. Leads and test rides ' +
+        'are saved and HELD in crm_jobs; they are delivered once CRM_PROVIDER=zoho.',
+    );
+  }
 
   /*
    * Belt and braces on the OTP echo. env.otpEchoEnabled already refuses in

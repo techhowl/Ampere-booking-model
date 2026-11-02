@@ -10,6 +10,10 @@ import type { PrismaClient } from '@prisma/client';
  * Order matters here. Keep new tables in dependency order, not alphabetical.
  */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
+  await prisma.crmJob.deleteMany({});
+  await prisma.crmToken.deleteMany({});
+  await prisma.crmVehicleModel.deleteMany({});
+
   await prisma.testRide.deleteMany({});
   await prisma.paymentEvent.deleteMany({});
   await prisma.order.deleteMany({});

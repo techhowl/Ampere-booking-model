@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { readSession, writeSession } from '@/lib/http/session';
 import { otpVerifySchema } from '@/lib/schemas/otp';
 import { verifyOtp } from '@/lib/otp/otp';
+import { queueLeadSync } from '@/lib/crm/schedule';
 
 /**
  * POST /api/otp/verify — check the code and mark the number verified.
@@ -16,6 +17,8 @@ import { verifyOtp } from '@/lib/otp/otp';
  */
 
 export const dynamic = 'force-dynamic';
+/** The CRM send runs after the response, inside this function's time. */
+export const maxDuration = 60;
 
 const MESSAGES: Record<string, string> = {
   not_found: 'That code is not valid. Please request a new one.',
@@ -85,6 +88,10 @@ export async function POST(request: NextRequest) {
       where: { id: lead.id },
       data: { phoneVerified: true },
     });
+
+    // Verified, so it may go to Greaves' CRM — sent after this response, never
+    // holding it up. See lib/crm/jobs.ts.
+    await queueLeadSync(lead.id);
 
     return writeSession(NextResponse.json({ verified: true }, { status: 200 }), {
       leadId: lead.id,

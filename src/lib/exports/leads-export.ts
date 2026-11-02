@@ -42,6 +42,8 @@ export interface LeadRow {
   source: string | null;
   utmSource: string | null;
   utmCampaign: string | null;
+  /** Set once Greaves' CRM has the lead; empty means not there (yet). */
+  crmLeadId: string | null;
 }
 
 export const LEAD_COLUMNS: { key: keyof LeadRow; header: string }[] = [
@@ -60,6 +62,7 @@ export const LEAD_COLUMNS: { key: keyof LeadRow; header: string }[] = [
   { key: 'source', header: 'Source' },
   { key: 'utmSource', header: 'UTM source' },
   { key: 'utmCampaign', header: 'UTM campaign' },
+  { key: 'crmLeadId', header: 'CRM lead ID' },
   { key: 'leadId', header: 'Lead ID' },
 ];
 
@@ -105,6 +108,7 @@ export async function exportLeads(
       source: lead.src,
       utmSource: utm.utm_source ?? null,
       utmCampaign: utm.utm_campaign ?? null,
+      crmLeadId: lead.crmLeadId,
     };
   });
 }
