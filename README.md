@@ -116,14 +116,25 @@ pnpm prisma db seed                   # dealers, pincodes, price book, inventory
 pnpm dev
 ```
 
-The dealer step measures distance from the pincode's centre, which comes from
-the `pincode_geo` table. The seed puts placeholder coordinates on its own
-pincodes. For real ones, load India Post's All India Pincode Directory
-(data.gov.in, CSV):
+The dealer step offers the three nearest dealers within 15 km of the
+pincode's centre, which comes from the `pincode_geo` table. The seed puts
+placeholder coordinates on its own pincodes. For every pincode in India, load
+India Post's All India Pincode Directory with latitude and longitude
+(data.gov.in; Government Open Data Licence – India, Department of Posts):
 
 ```bash
-pnpm db:import-pincodes path/to/pincodes.csv
+# data.gov.in wants a sign-up to download; an exact copy of its CSV is at
+# https://raw.githubusercontent.com/dropdevrahul/pincodes-india/HEAD/pincode.csv
+pnpm db:import-pincodes path/to/pincode.csv
 ```
+
+The directory has wrong coordinates for some pincodes, so the import is not a
+plain average: `src/lib/dealers/pincode-geo.ts` explains its rules and holds
+hand-checked corrections. Loaded on 2026-11-02, it placed 18,668 pincodes,
+with 20 independently checked pincodes all within 2.3 km. About 600 doubtful
+ones are stored without a location and fall back to their postal district. If
+a customer's dealer list looks wrong, add their pincode to `CORRECTIONS` and
+re-run the import.
 
 Two secrets to generate before anything runs:
 

@@ -2,30 +2,27 @@ import 'dotenv/config';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { cleanPincodeLocations, usablePoint, type Office } from '../src/lib/dealers/pincode-geo';
 
 /**
  * Load pincode coordinates into pincode_geo.
  *
  *   pnpm db:import-pincodes path/to/pincodes.csv
  *
- * Built for India Post's "All India Pincode Directory" (data.gov.in, Open
- * Government Data Licence). Any CSV works if it has columns named pincode,
- * latitude and longitude; other columns are ignored.
+ * Built for India Post's "All India Pincode Directory" with latitude and
+ * longitude (data.gov.in, Government Open Data Licence — India; attribution:
+ * Department of Posts). Any CSV works if it has columns named pincode,
+ * latitude and longitude; an OfficeType column, if present, marks head offices.
  *
- * The directory lists post offices, not pincodes — several rows per pincode,
- * and its coordinates are uneven: "NA", zeros, values outside India, latitude
- * and longitude swapped. So each pincode gets the median of its usable rows,
- * which one bad office cannot drag across the state.
+ * The directory lists post offices, not pincodes, and its coordinates are
+ * uneven. How each pincode's one location is chosen — and when none is — is in
+ * src/lib/dealers/pincode-geo.ts, with the faults that shaped it.
  *
- * Idempotent. Re-running with a newer file updates what changed.
+ * Idempotent. Re-running with a newer file updates what changed, and clears
+ * any pincode that has become doubtful.
  */
 
-const INDIA = { latMin: 6, latMax: 37.5, lngMin: 68, lngMax: 97.5 };
 const BATCH = 1000;
-
-function inIndia(lat: number, lng: number): boolean {
-  return lat >= INDIA.latMin && lat <= INDIA.latMax && lng >= INDIA.lngMin && lng <= INDIA.lngMax;
-}
 
 /** One CSV line into fields. Handles quoted fields and doubled quotes. */
 function splitCsvLine(line: string): string[] {
@@ -57,12 +54,6 @@ function splitCsvLine(line: string): string[] {
   return fields.map((f) => f.trim());
 }
 
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
-}
-
 async function main(): Promise<void> {
   const file = process.argv[2];
   if (!file) {
@@ -73,14 +64,14 @@ async function main(): Promise<void> {
   const lines = createInterface({ input: createReadStream(file), crlfDelay: Infinity });
 
   let header: string[] | null = null;
-  let col = { pincode: -1, lat: -1, lng: -1 };
-  const points = new Map<string, { lat: number[]; lng: number[] }>();
+  let col = { pincode: -1, lat: -1, lng: -1, type: -1 };
+  const offices: Office[] = [];
   let rows = 0;
   let unusable = 0;
 
   for await (const line of lines) {
     if (!line.trim()) continue;
-    const fields = splitCsvLine(line.replace(/^﻿/, ''));
+    const fields = splitCsvLine(line.replace(/^\uFEFF/, ''));
 
     if (!header) {
       header = fields.map((f) => f.toLowerCase());
@@ -88,6 +79,7 @@ async function main(): Promise<void> {
         pincode: header.indexOf('pincode'),
         lat: header.indexOf('latitude'),
         lng: header.indexOf('longitude'),
+        type: header.indexOf('officetype'),
       };
       if (col.pincode < 0 || col.lat < 0 || col.lng < 0) {
         console.error(
@@ -100,48 +92,39 @@ async function main(): Promise<void> {
 
     rows++;
     const pincode = fields[col.pincode] ?? '';
-    let lat = Number(fields[col.lat]);
-    let lng = Number(fields[col.lng]);
-
-    if (!/^[1-9]\d{5}$/.test(pincode) || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    const point = usablePoint(Number(fields[col.lat]), Number(fields[col.lng]));
+    if (!/^[1-9]\d{5}$/.test(pincode) || !point) {
       unusable++;
       continue;
     }
-    // A common slip in the directory: the two columns the wrong way round.
-    if (!inIndia(lat, lng) && inIndia(lng, lat)) [lat, lng] = [lng, lat];
-    if (!inIndia(lat, lng)) {
-      unusable++;
-      continue;
-    }
-
-    const entry = points.get(pincode) ?? { lat: [], lng: [] };
-    entry.lat.push(lat);
-    entry.lng.push(lng);
-    points.set(pincode, entry);
+    const type = col.type >= 0 ? (fields[col.type] ?? '').toUpperCase().replace(/\./g, '') : '';
+    offices.push({ pincode, lat: point[0], lng: point[1], headOffice: type === 'HO' });
   }
 
-  const prisma = new PrismaClient();
-  const all = [...points.entries()].map(([pincode, p]) => ({
-    pincode,
-    lat: median(p.lat),
-    lng: median(p.lng),
-  }));
+  const { locations, doubtful, officesIgnored } = cleanPincodeLocations(offices);
 
+  const prisma = new PrismaClient();
   try {
-    for (let i = 0; i < all.length; i += BATCH) {
-      const batch = all.slice(i, i + BATCH);
+    for (let i = 0; i < locations.length; i += BATCH) {
+      const batch = locations.slice(i, i + BATCH);
       await prisma.$executeRaw`
         INSERT INTO pincode_geo (pincode, lat, lng)
         VALUES ${Prisma.join(batch.map((r) => Prisma.sql`(${r.pincode}, ${r.lat}, ${r.lng})`))}
         ON CONFLICT (pincode) DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng
       `;
     }
+    // A doubtful pincode keeps no location, so the dealer step falls back to
+    // its postal district rather than measuring from a wrong point.
+    let cleared = 0;
+    for (let i = 0; i < doubtful.length; i += BATCH) {
+      cleared += await prisma.pincodeGeo.deleteMany({ where: { pincode: { in: doubtful.slice(i, i + BATCH) } } }).then((r) => r.count);
+    }
+    console.log(`Read ${rows} rows, ${unusable} without usable coordinates, ${officesIgnored} offices ignored as far outside their district.`);
+    console.log(`Loaded ${locations.length} pincodes into pincode_geo.`);
+    console.log(`${doubtful.length} pincodes doubtful, stored without a location${cleared ? ` (${cleared} cleared)` : ''}.`);
   } finally {
     await prisma.$disconnect();
   }
-
-  console.log(`Read ${rows} rows, ${unusable} without usable coordinates.`);
-  console.log(`Loaded ${all.length} pincodes into pincode_geo.`);
 }
 
 main().catch((error: unknown) => {

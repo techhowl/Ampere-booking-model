@@ -97,9 +97,9 @@ const DEALERS: SeedDealer[] = [
     lng: 77.6408,
     homeServiceable: true,
   },
-  // Three more around Bengaluru, so the dealer step has three within 15 km
-  // to show. Mumbai (400001) is left with one dealer 22 km away, so the
-  // "nothing in range" state is reachable too.
+  // Three more around Bengaluru, so the dealer step has three within the
+  // 15 km radius to show. Mumbai (400001) has only Andheri, 22 km away and so
+  // out of range, which keeps the "no dealership in your area" state reachable.
   {
     dealerCode: 'AMP-S-003',
     name: 'Ampere Koramangala',

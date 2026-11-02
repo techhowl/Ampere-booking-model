@@ -24,11 +24,11 @@ import { resolvePincode, type ResolvedDealer } from './resolve';
 /**
  * One setting. Change it here and the step's copy follows.
  *
- * 25km is a city-scale radius: it covers Mumbai end to end and Bengaluru's
- * ring, without reaching the next city. Above about 30 the nearest "local"
- * dealer stops being local.
+ * 15 km, as Ampere asked (10 to 15 km from the pincode). It is also the radius
+ * Greaves' CRM uses for its own nearest-dealer search, so a dealer we offer is
+ * one the CRM would have picked too.
  */
-export const DEALER_RADIUS_KM = 25;
+export const DEALER_RADIUS_KM = 15;
 
 export const MAX_DEALER_CHOICES = 3;
 
@@ -141,14 +141,18 @@ async function regionDealers(prisma: PrismaClient, pincode: string): Promise<Nea
   if (!location.regionCode) return [];
 
   const district = pincode.slice(0, 3);
-  const first = location.dealer ? [{ ...location.dealer, distanceKm: null }] : [];
+  // Only the pincode's OWN mapped dealer goes first. A fallback dealer — the
+  // first in the whole postal zone for an unmapped pincode — can be in another
+  // city: that put a Bengaluru showroom in front of a customer in Hassan.
+  const own = location.dealer && !location.usedFallback ? location.dealer : null;
+  const first = own ? [{ ...own, distanceKm: null }] : [];
 
   const others = await prisma.dealer.findMany({
     where: {
       active: true,
       // Serves at least one pincode in the same sorting district.
       pincodeMap: { some: { pincode: { startsWith: district } } },
-      ...(location.dealer ? { dealerCode: { not: location.dealer.code } } : {}),
+      ...(own ? { dealerCode: { not: own.code } } : {}),
     },
     orderBy: { dealerCode: 'asc' },
     take: MAX_DEALER_CHOICES - first.length,

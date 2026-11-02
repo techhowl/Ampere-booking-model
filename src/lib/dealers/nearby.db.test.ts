@@ -18,6 +18,8 @@ const DEALERS = {
   whitefield: { lat: 12.9698, lng: 77.75 }, // ~11.9 km
   mysuru: { lat: 12.2958, lng: 76.6394 }, // ~130 km
   hosur: { lat: 12.7409, lng: 77.8253 }, // ~33 km
+  yelahanka: { lat: 13.1, lng: 77.5963 }, // ~14.3 km
+  devanahalli: { lat: 13.1408, lng: 77.6533 }, // ~18.1 km
 } as const;
 
 type DealerKey = keyof typeof DEALERS;
@@ -73,6 +75,15 @@ describe('dealers within the radius', () => {
 
     expect(result.basis).toBe('radius');
     expect(codes(result)).toEqual(['koramangala']);
+  });
+
+  it('reaches 15 km by default, as Ampere asked, and no further', async () => {
+    await dealer('yelahanka');
+    await dealer('devanahalli');
+
+    const result = await findNearbyDealers(prisma, PINCODE);
+    expect(result.radiusKm).toBe(15);
+    expect(codes(result)).toEqual(['yelahanka']);
   });
 
   it('takes the radius as a setting', async () => {
@@ -144,6 +155,14 @@ describe('a pincode we have no coordinates for', () => {
      * of which are "west".
      */
     expect(codes(result)).toEqual(['koramangala', 'jayanagar']);
+  });
+
+  it('never offers a dealer from another city to a pincode we know nothing about', async () => {
+    // 573xxx (Hassan) is in the south zone, but no dealer serves its district.
+    // The zone's first dealer — Jayanagar here, 180 km away — must not be offered.
+    const result = await findNearbyDealers(prisma, '573201');
+    expect(result.basis).toBe('region');
+    expect(result.dealers).toEqual([]);
   });
 
   it('offers nothing where there is no region at all', async () => {
