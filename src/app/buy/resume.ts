@@ -5,7 +5,7 @@ import { findNearbyDealers } from '@/lib/dealers/nearby';
 import { catalogForPincode, type ModelAvailability } from '@/lib/catalog/availability';
 import { getModel } from '@/lib/catalog/catalog';
 import { toLeadResponse } from '@/lib/leads/save-lead';
-import { describeSlot } from '@/lib/test-rides/slots';
+import { describeSlot, formatSlotDate } from '@/lib/test-rides/slots';
 import type { LeadCreatedResponse } from '@/lib/schemas/lead';
 import type { NearbyDealer, NearbyDealersResponse } from '@/lib/schemas/dealer';
 import type { Booking } from './TestRideStep';
@@ -143,5 +143,7 @@ async function loadBooking(
     modelName: getModel(ride.modelCode)?.name ?? ride.modelCode,
     // Not stored; the confirmation says so neutrally.
     dealerNotified: null,
+    slotDate: formatSlotDate(ride.slotDate),
+    slotWindow: ride.slotWindow,
   };
 }

@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react';
 import type { ModelAvailability } from '@/lib/catalog/availability';
 import type { NearbyDealer } from '@/lib/schemas/dealer';
 import { HELP_TOPIC_LABELS, SHOWN_HELP_TOPICS, type HelpTopic } from '@/lib/schemas/test-ride';
-import { getModel } from '@/lib/catalog/catalog';
+import { MAIN_SITE, getModel } from '@/lib/catalog/catalog';
 import { displayPhone } from '@/lib/phone-format';
 import { SUPPORT_PHONE } from '@/lib/contact';
-import type { OfferedDay } from '@/lib/test-rides/slots';
+import { getSlotWindow, type OfferedDay } from '@/lib/test-rides/slots';
 import { FOCUS, Notice, Pill, PrimaryButton, Skeleton } from '@/components/ui';
 import { CheckIcon, DocumentIcon, DownloadIcon, PhoneIcon, StoreIcon } from '@/components/Brand';
-import { StepActions, StepHeader } from './StepFrame';
+import { Eyebrow, StepActions, StepHeader } from './StepFrame';
 
 /**
  * Step five, test ride: which day, which slot, and anything we can help with
@@ -47,7 +47,12 @@ export interface Booking {
   modelName: string;
   /** Null when not known — a confirmation shown again after a refresh. */
   dealerNotified: boolean | null;
+  /** "2026-11-03" and "w2": the summary's date and time, shown separately. */
+  slotDate?: string;
+  slotWindow?: string;
 }
+
+const NETWORK_ERROR = 'We couldn’t process your request. Please try again in a moment.';
 
 export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, onBack }: Props) {
   const [days, setDays] = useState<OfferedDay[] | null>(null);
@@ -120,18 +125,13 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
       setError(body?.message ?? 'We could not book that slot. Please try another.');
     } catch {
-      setError('We could not reach our servers. Check your connection and try again.');
+      setError(NETWORK_ERROR);
     } finally {
       setSubmitting(false);
     }
   }
 
-  const header = (
-    <StepHeader
-      title="Book Your Test Ride"
-      text="Pick a time that suits you. It’s free, with no obligation to buy."
-    />
-  );
+  const header = <StepHeader eyebrow="Book a test ride" title="Pick a time that suits you." />;
 
   if (!days) {
     return (
@@ -140,14 +140,15 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
         {error ? (
           <Notice tone="error">{error}</Notice>
         ) : (
-          <div className="flex flex-col gap-3" aria-busy aria-label="Loading times">
+          <div className="flex flex-col gap-3" aria-busy>
+            <p className="text-[13px] text-amp-muted">Please wait, we’re getting things ready.</p>
             <Skeleton className="h-20 w-full rounded-2xl" />
             <Skeleton className="h-16 w-full rounded-2xl" />
             <Skeleton className="h-24 w-full rounded-2xl" />
           </div>
         )}
-        <StepActions onBack={onBack}>
-          <PrimaryButton disabled>Book Test Ride</PrimaryButton>
+        <StepActions onBack={onBack} backLabel="Go Back">
+          <PrimaryButton disabled>Confirm Test Ride</PrimaryButton>
         </StepActions>
       </div>
     );
@@ -167,7 +168,7 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
         </div>
       )}
 
-      <Group label="Day">
+      <Group label="Select a convenient date">
         <div className="amp-scroll -mx-4 flex gap-2.5 overflow-x-auto px-4 pb-1 sm:-mx-8 sm:px-8">
           {days.map((day) => {
             const isSelected = day.date === date;
@@ -210,7 +211,7 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
       </Group>
 
       {selectedDay && (
-        <Group label="Time">
+        <Group label="Choose Your Preferred Time">
           <div className="grid grid-cols-2 gap-2.5">
             {selectedDay.windows.map((window) => (
               <Pill
@@ -228,7 +229,7 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
             ))}
           </div>
           {!selectedDay.hasAvailability && (
-            <p className="text-[13px] text-amp-muted">No times left today — pick another day.</p>
+            <p className="text-[13px] text-amp-muted">No times left today. Please pick another day.</p>
           )}
         </Group>
       )}
@@ -300,13 +301,17 @@ export function TestRideStep({ model, colourCode, dealer, onBooked, onExpired, o
       {error && <Notice tone="error">{error}</Notice>}
 
       <div className="flex flex-col gap-3">
-        <StepActions onBack={onBack}>
+        <StepActions onBack={onBack} backLabel="Go Back">
           <PrimaryButton type="submit" loading={submitting} disabled={!date || !slot}>
-            Book Test Ride
+            Confirm Test Ride
           </PrimaryButton>
         </StepActions>
-        {!slot && (
-          <p className="text-center text-[12px] text-amp-muted">Pick a time to continue.</p>
+        {submitting ? (
+          <p className="text-center text-[12px] text-amp-muted" aria-live="polite">
+            Processing your request…
+          </p>
+        ) : (
+          !slot && <p className="text-center text-[12px] text-amp-muted">Pick a time to continue.</p>
         )}
       </div>
     </form>
@@ -337,6 +342,32 @@ function Group({
 
 /* ------------------------------------------------------------------ */
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "Tue, 3 Nov 2026". By hand, so server and browser render the same text. */
+function bookingDate(slotDate: string | undefined): string | null {
+  const match = slotDate?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return `${WEEKDAYS[date.getUTCDay()]}, ${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+function SummaryRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5 px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+      <dt className="shrink-0 text-[12px] font-semibold uppercase tracking-wide text-amp-muted">{label}</dt>
+      <dd className="min-w-0 text-[14px] font-semibold text-amp-ink sm:text-right">{children}</dd>
+    </div>
+  );
+}
+
+const LINK_PRIMARY = [
+  'inline-flex min-h-13 items-center justify-center gap-2.5 rounded-xl bg-amp-cta px-6',
+  'text-[15px] font-semibold tracking-wide text-white transition-colors hover:bg-amp-cta-hover',
+  FOCUS,
+].join(' ');
+
 export function TestRideConfirmation({
   booking,
   canBuy,
@@ -350,68 +381,74 @@ export function TestRideConfirmation({
   backHref: string;
 }) {
   const phone = booking.dealer.phone;
+  const date = bookingDate(booking.slotDate);
+  const time = booking.slotWindow ? (getSlotWindow(booking.slotWindow)?.label ?? null) : null;
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col items-center gap-3 pt-2 text-center">
         <span className="amp-pop flex size-14 items-center justify-center rounded-full bg-amp-offer text-amp-offer-ink">
           <CheckIcon className="size-7" />
         </span>
+        <Eyebrow>Your test ride is booked!</Eyebrow>
         <h2
           tabIndex={-1}
           data-step-heading
-          className="text-[24px] font-bold leading-tight tracking-tight text-amp-ink outline-none sm:text-[28px]"
+          className="-mt-1.5 text-[24px] font-bold leading-tight tracking-tight text-amp-ink outline-none sm:text-[28px]"
         >
-          Your Test Ride Is Booked
+          Your Ampere experience awaits.
         </h2>
-        <p className="max-w-[40ch] text-[15px] leading-relaxed text-amp-muted">
-          {booking.modelName}, {booking.slot},{' '}
-          {booking.mode === 'home' ? 'at your home' : `at ${booking.dealer.name}`}.
+        <p className="max-w-[44ch] text-[15px] leading-relaxed text-amp-muted">
+          Your test ride request has been successfully submitted. Our dealership team will
+          connect with you shortly to confirm your appointment.
         </p>
       </div>
 
       {/* Never silently move someone's test ride. */}
       {booking.modeChangedReason && <Notice tone="warn">{booking.modeChangedReason}</Notice>}
 
-      <div className="flex items-start gap-3.5 rounded-2xl border border-amp-line bg-white p-4">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amp-page text-amp-ink">
-          <StoreIcon className="size-5" />
-        </span>
-        <div className="min-w-0">
-          <p className="text-[15px] font-semibold text-amp-ink">{booking.dealer.name}</p>
+      <dl className="divide-y divide-amp-line rounded-2xl border border-amp-line bg-white">
+        <SummaryRow label="Selected Scooter">{booking.modelName}</SummaryRow>
+        <SummaryRow label="Preferred Dealership">
+          {booking.mode === 'home' ? 'At your home' : booking.dealer.name}
           {booking.dealer.address && (
-            <p className="mt-0.5 text-[13px] leading-relaxed text-amp-muted">
+            <span className="mt-0.5 block text-[13px] font-normal leading-relaxed text-amp-muted">
               {booking.dealer.address}
-            </p>
+            </span>
           )}
           {/* The number itself, so it can be read and saved, not just tapped.
               Customer care when the dealer master has none. */}
           <a
             href={`tel:${phone ?? SUPPORT_PHONE.tel}`}
-            className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline"
+            className="mt-1 inline-flex items-center gap-1.5 text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline"
           >
             <PhoneIcon className="size-3.5" />
             {phone ? displayPhone(phone) : `Customer care · ${SUPPORT_PHONE.display}`}
           </a>
-        </div>
-      </div>
-
-      <p className="text-center text-[13px] leading-relaxed text-amp-muted">
-        {booking.dealerNotified === true
-          ? 'The dealer has been notified and will confirm with you shortly.'
-          : booking.dealerNotified === false
-            ? 'We are still passing this to the dealer. Your booking is confirmed either way.'
-            : 'Your dealer will confirm with you shortly.'}
-      </p>
+        </SummaryRow>
+        {date && time ? (
+          <>
+            <SummaryRow label="Preferred Date">{date}</SummaryRow>
+            <SummaryRow label="Preferred Time">{time}</SummaryRow>
+          </>
+        ) : (
+          // A booking shown again after a refresh may only know its slot as one line.
+          <SummaryRow label="Preferred Date & Time">{booking.slot}</SummaryRow>
+        )}
+      </dl>
 
       {/* Spec 4: the cross-sell re-opens the other branch. A completed test
           ride is not the end of the journey. */}
       <div className="flex flex-col gap-3">
         {canBuy && <PrimaryButton onClick={onBuy}>Buy your {booking.modelName} now</PrimaryButton>}
+        <a href={backHref} className={LINK_PRIMARY}>
+          Explore Ampere
+        </a>
         <a
-          href={backHref}
+          href={MAIN_SITE}
           className={`flex min-h-11 items-center justify-center rounded-xl text-[14px] font-medium text-amp-muted transition-colors hover:text-amp-ink ${FOCUS}`}
         >
-          Back to the scooters
+          Visit Website
         </a>
       </div>
     </div>

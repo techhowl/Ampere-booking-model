@@ -19,8 +19,8 @@ export const HELP_TOPICS = ['offers', 'brochure', 'financing', 'specs'] as const
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 export const HELP_TOPIC_LABELS: Record<HelpTopic, string> = {
-  offers: 'Current offers',
-  brochure: 'Brochure',
+  offers: 'Current Offers',
+  brochure: 'Download Brochures',
   financing: 'Financing and EMI',
   specs: 'Specifications',
 };

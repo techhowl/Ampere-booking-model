@@ -22,10 +22,10 @@ export const maxDuration = 60;
 
 const MESSAGES: Record<string, string> = {
   not_found: 'That code is not valid. Please request a new one.',
-  expired: 'That code has expired. Please request a new one.',
+  expired: 'Your verification code has expired. Request a new one.',
   already_used: 'That code has already been used.',
   too_many_attempts: 'Too many incorrect attempts. Please request a new code.',
-  incorrect: 'That code is not correct.',
+  incorrect: 'That doesn’t look right. Please check the code and try again.',
 };
 
 export async function POST(request: NextRequest) {

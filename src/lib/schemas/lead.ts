@@ -40,6 +40,12 @@ export const attributionSchema = z.object({
   sourceRaw: z.record(z.string(), z.string()).nullable().optional(),
 });
 
+/** The customer-facing wording is from Ampere's copy document. */
+export const PHONE_INVALID_MESSAGE = 'Please enter a valid 10-digit mobile number.';
+export const PINCODE_INVALID_MESSAGE = 'Please enter a valid 6-digit pincode.';
+
+const pincodeField = z.string().trim().refine(isValidPincode, PINCODE_INVALID_MESSAGE);
+
 /**
  * Step one. The moment all three of these are present and valid, the lead is
  * written — before the OTP is sent, not after it is verified.
@@ -54,12 +60,9 @@ export const leadIdentitySchema = z.object({
   phone: z
     .string()
     .trim()
-    .refine(isValidPhone, 'Enter a valid 10-digit mobile number'),
+    .refine(isValidPhone, PHONE_INVALID_MESSAGE),
 
-  pincode: z
-    .string()
-    .trim()
-    .refine(isValidPincode, 'Enter a valid 6-digit pincode'),
+  pincode: pincodeField,
 
   consent: consentSchema,
 
@@ -73,6 +76,9 @@ export const leadIdentitySchema = z.object({
 });
 
 export type LeadIdentityInput = z.infer<typeof leadIdentitySchema>;
+
+/** "Change location" on the dealer step: the same lead, another pincode. */
+export const changePincodeSchema = z.object({ pincode: pincodeField });
 export type ConsentInput = z.infer<typeof consentSchema>;
 export type AttributionInput = z.infer<typeof attributionSchema>;
 

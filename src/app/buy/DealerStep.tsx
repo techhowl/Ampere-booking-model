@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { displayPhone } from '@/lib/phone-format';
+import { useEffect, useId, useRef, useState } from 'react';
+import { displayPhone, isValidPincode } from '@/lib/phone-format';
+import { PINCODE_INVALID_MESSAGE } from '@/lib/schemas/lead';
 import type { NearbyDealer, NearbyDealersResponse } from '@/lib/schemas/dealer';
-import { Notice, PrimaryButton, SelectionDot, Skeleton } from '@/components/ui';
+import { Notice, PrimaryButton, SelectionDot, Skeleton, inputClass } from '@/components/ui';
 import { PhoneIcon, PinIcon, StoreIcon } from '@/components/Brand';
 import { SUPPORT_PHONE } from '@/lib/contact';
 import { StepActions, StepHeader } from './StepFrame';
@@ -27,7 +28,14 @@ interface Props {
   /** The session timed out; the journey asks for the OTP again. */
   onExpired: () => void;
   onBack: () => void;
+  /**
+   * "Change location": no dealership near this pincode, so try another. Moves
+   * the lead to it and resolves to null, or to a message to show.
+   */
+  onChangePincode: (pincode: string) => Promise<string | null>;
 }
+
+const NETWORK_ERROR = 'We couldn’t process your request. Please try again in a moment.';
 
 export function DealerStep({
   pincode,
@@ -37,6 +45,7 @@ export function DealerStep({
   onConfirmed,
   onExpired,
   onBack,
+  onChangePincode,
 }: Props) {
   const [data, setData] = useState<NearbyDealersResponse | null>(
     cached?.pincode === pincode ? cached : null,
@@ -44,6 +53,9 @@ export function DealerStep({
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
+  // Once the customer has chosen, the list folds to their dealer with a "Great
+  // choice!" line; "Change Dealer" opens it again.
+  const [chosen, setChosen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,9 +88,10 @@ export function DealerStep({
   useEffect(() => {
     if (!data || selectedCode) return;
     const codes = data.dealers.map((d) => d.code);
-    setSelectedCode(
-      preferredCode && codes.includes(preferredCode) ? preferredCode : (codes[0] ?? null),
-    );
+    const returning = !!preferredCode && codes.includes(preferredCode);
+    setSelectedCode(returning ? preferredCode : (codes[0] ?? null));
+    // Coming back to a choice already made: show it as made.
+    setChosen(returning);
   }, [data, preferredCode, selectedCode]);
 
   async function confirm() {
@@ -105,22 +118,28 @@ export function DealerStep({
       }
       if (res.status === 401) return onExpired();
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
-      setError(body?.message ?? 'We could not save your dealer. Please try again.');
+      setError(body?.message ?? 'Something went wrong. Please try again.');
     } catch {
-      setError('We could not reach our servers. Check your connection and try again.');
+      setError(NETWORK_ERROR);
     } finally {
       setSaving(false);
     }
   }
 
   const dealers = data?.dealers ?? [];
+  const selected = dealers.find((d) => d.code === selectedCode) ?? null;
+  const folded = chosen && selected !== null;
 
   return (
     <div className="flex flex-col gap-7">
-      <StepHeader title="Find Your Nearest Dealer" text="Choose a dealership near you to continue." />
+      <StepHeader
+        eyebrow="Find your nearest dealer"
+        title="Choose an authorised Ampere dealership near you and take the next step towards your new ride."
+      />
 
       {!data && !loadFailed && (
-        <div className="flex flex-col gap-3" aria-busy aria-label="Finding dealers near you">
+        <div className="flex flex-col gap-3" aria-busy>
+          <p className="text-[13px] text-amp-muted">Finding dealerships near you…</p>
           <Skeleton className="h-6 w-56 rounded-full" />
           <Skeleton className="h-28 w-full rounded-2xl" />
           <Skeleton className="h-28 w-full rounded-2xl" />
@@ -130,7 +149,7 @@ export function DealerStep({
 
       {loadFailed && (
         <Notice tone="error">
-          We couldn&apos;t find dealers right now.{' '}
+          Something went wrong. Please try again.{' '}
           <button
             type="button"
             onClick={() => setAttempt((n) => n + 1)}
@@ -143,55 +162,137 @@ export function DealerStep({
 
       {data && dealers.length > 0 && (
         <div className="flex flex-col gap-3">
-          {data.basis === 'radius' && (
+          {!folded && (
             <p className="inline-flex items-center gap-1.5 text-[13px] text-amp-muted">
               <PinIcon className="size-4" />
-              {dealers.length === 1 ? 'One dealer' : `${dealers.length} dealers`} within{' '}
-              {data.radiusKm} km of <span className="font-semibold text-amp-ink">{pincode}</span>
+              Your nearest Ampere experience centres:
             </p>
           )}
-          {data.basis === 'region' && <Notice>These Ampere dealers serve your area.</Notice>}
 
           <div role="group" aria-label="Dealers" className="flex flex-col gap-3">
-            {dealers.map((dealer, index) => (
+            {(folded ? [selected] : dealers).map((dealer) => (
               <DealerCard
                 key={dealer.code}
                 dealer={dealer}
-                nearest={index === 0 && data.basis !== 'region' && dealers.length > 1}
+                nearest={dealer.code === dealers[0]?.code && data.basis !== 'region' && dealers.length > 1}
                 selected={dealer.code === selectedCode}
-                onSelect={() => setSelectedCode(dealer.code)}
+                onSelect={() => {
+                  setSelectedCode(dealer.code);
+                  setChosen(true);
+                }}
               />
             ))}
           </div>
+
+          {folded && (
+            <p className="amp-rise flex flex-wrap items-baseline gap-x-2 text-[14px] text-amp-ink" aria-live="polite">
+              <span>
+                Great choice! Your preferred dealership is{' '}
+                <span className="font-semibold">{selected.name}</span>.
+              </span>
+              {dealers.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setChosen(false)}
+                  className="cursor-pointer rounded-md px-0.5 text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-amp-accent"
+                >
+                  Change Dealer
+                </button>
+              )}
+            </p>
+          )}
         </div>
       )}
 
-      {data && dealers.length === 0 && (
-        <div className="flex flex-col items-center rounded-2xl border border-dashed border-amp-line bg-amp-page/50 px-6 py-9 text-center">
-          <span className="flex size-12 items-center justify-center rounded-full bg-white text-amp-ink shadow-sm">
-            <StoreIcon className="size-6" />
-          </span>
-          <p className="mt-4 text-[16px] font-semibold text-amp-ink">No dealer near {pincode} yet</p>
-          <p className="mt-1.5 max-w-[36ch] text-[14px] leading-relaxed text-amp-muted">
-            Your details are saved and our team will call you to help. Or speak to us now.
-          </p>
-          <a
-            href={`tel:${SUPPORT_PHONE.tel}`}
-            className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl border border-amp-line bg-white px-5 text-[14px] font-semibold text-amp-ink transition-colors hover:border-amp-ink"
-          >
-            <PhoneIcon className="size-4" />
-            Call {SUPPORT_PHONE.display}
-          </a>
-        </div>
-      )}
+      {data && dealers.length === 0 && <NoDealership pincode={pincode} onChangePincode={onChangePincode} />}
 
       {error && <Notice tone="error">{error}</Notice>}
 
       <StepActions onBack={onBack}>
         <PrimaryButton onClick={() => void confirm()} loading={saving} disabled={!selectedCode}>
-          Continue
+          Continue to Test Ride
         </PrimaryButton>
       </StepActions>
+    </div>
+  );
+}
+
+/**
+ * No dealership within reach of this pincode. The customer can try another
+ * — where they work, say — without leaving the step.
+ */
+function NoDealership({
+  pincode,
+  onChangePincode,
+}: {
+  pincode: string;
+  onChangePincode: (pincode: string) => Promise<string | null>;
+}) {
+  const inputId = useId();
+  const [value, setValue] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!isValidPincode(value)) return setMessage(PINCODE_INVALID_MESSAGE);
+    if (value === pincode) return setMessage('That is the pincode we just searched. Try another.');
+    setBusy(true);
+    setMessage(null);
+    const problem = await onChangePincode(value);
+    setBusy(false);
+    if (problem) setMessage(problem);
+  }
+
+  return (
+    <div className="flex flex-col items-center rounded-2xl border border-dashed border-amp-line bg-amp-page/50 px-6 py-9 text-center">
+      <span className="flex size-12 items-center justify-center rounded-full bg-white text-amp-ink shadow-sm">
+        <StoreIcon className="size-6" />
+      </span>
+      <p className="mt-4 text-[16px] font-semibold text-amp-ink">
+        No dealerships available in your area right now
+      </p>
+      <p className="mt-1.5 max-w-[38ch] text-[14px] leading-relaxed text-amp-muted">
+        Try another location or pincode to discover an Ampere dealership near you.
+      </p>
+
+      <form onSubmit={submit} noValidate className="mt-5 flex w-full max-w-sm flex-col gap-2 sm:flex-row">
+        <label htmlFor={inputId} className="sr-only">
+          Pincode
+        </label>
+        <input
+          id={inputId}
+          type="text"
+          inputMode="numeric"
+          autoComplete="postal-code"
+          maxLength={6}
+          value={value}
+          onChange={(e) => setValue(e.target.value.replace(/\D/g, ''))}
+          placeholder="Enter another pincode"
+          className={`${inputClass(!!message)} text-center sm:text-left`}
+          aria-invalid={!!message}
+          aria-describedby={`${inputId}-message`}
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          className="inline-flex min-h-12 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-amp-cta px-5 text-[14px] font-semibold text-white transition-colors hover:bg-amp-cta-hover disabled:cursor-wait disabled:opacity-70"
+        >
+          <PinIcon className="size-4" />
+          {busy ? 'Processing your request…' : 'Change Location'}
+        </button>
+      </form>
+      <p id={`${inputId}-message`} role={message ? 'alert' : undefined} className="mt-2 min-h-5 text-[13px] text-red-600">
+        {message}
+      </p>
+
+      <a
+        href={`tel:${SUPPORT_PHONE.tel}`}
+        className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-amp-ink underline-offset-4 hover:underline"
+      >
+        <PhoneIcon className="size-3.5" />
+        Or call us on {SUPPORT_PHONE.display}
+      </a>
     </div>
   );
 }

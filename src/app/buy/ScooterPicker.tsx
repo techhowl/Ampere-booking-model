@@ -63,7 +63,7 @@ export function ScooterPicker({
   onContinue,
 }: Props) {
   const header = (
-    <StepHeader title="Choose Your Ampere" text="Select your preferred scooter and colour." />
+    <StepHeader eyebrow="Choose your next smart ride" title="Select your preferred scooter and colour." />
   );
 
   if (!models) {
@@ -78,14 +78,15 @@ export function ScooterPicker({
             </button>
           </Notice>
         ) : (
-          <div className="flex flex-col gap-3" aria-busy aria-label="Loading scooters">
+          <div className="flex flex-col gap-3" aria-busy>
+            <p className="text-[13px] text-amp-muted">Please wait, we’re getting things ready.</p>
             <Skeleton className="h-11 w-64 rounded-full" />
             <Skeleton className="h-36 w-full rounded-2xl" />
             <Skeleton className="h-36 w-full rounded-2xl" />
           </div>
         )}
         <StepActions onBack={onBack}>
-          <PrimaryButton disabled>Continue to Dealers</PrimaryButton>
+          <PrimaryButton disabled>Continue to Dealer Selection</PrimaryButton>
         </StepActions>
       </div>
     );
@@ -157,7 +158,7 @@ export function ScooterPicker({
                   <ScooterCard
                     key={model.code}
                     title={model.name}
-                    price={model.price ? `${model.price.exShowroom.display}*` : 'Price on enquiry'}
+                    price={model.price ? `Starting at ${model.price.exShowroom.display}*` : 'Price on enquiry'}
                     shown={model}
                     colourCode={isSelected ? selectedColourCode : null}
                     selected={isSelected}
@@ -194,11 +195,13 @@ export function ScooterPicker({
         </div>
       </div>
 
-      <p className="-mt-3 text-[12px] text-amp-muted">*Ex-showroom price for your pincode.</p>
+      <p className="-mt-3 text-[12px] text-amp-muted">
+        *Ex-showroom price. Final price may vary based on your location.
+      </p>
 
       <StepActions onBack={onBack}>
         <PrimaryButton onClick={onContinue} disabled={!selected || !selectedColourCode}>
-          Continue to Dealers
+          Continue to Dealer Selection
         </PrimaryButton>
       </StepActions>
     </div>
@@ -207,16 +210,17 @@ export function ScooterPicker({
 
 /**
  * A scooter sold in two versions shows the chosen version's price, or — before
- * one is chosen — "From" the lowest. Both figures are the server's.
+ * one is chosen — the lowest. "Starting at" either way: the copy document's
+ * price label. Both figures are the server's.
  */
 function groupPrice(versions: ModelAvailability[], chosen: ModelAvailability | null): string {
-  if (chosen) return chosen.price ? `${chosen.price.exShowroom.display}*` : 'Price on enquiry';
+  if (chosen) return chosen.price ? `Starting at ${chosen.price.exShowroom.display}*` : 'Price on enquiry';
   const priced = versions.filter((v) => v.price);
   if (priced.length === 0) return 'Price on enquiry';
   const lowest = priced.reduce((a, b) =>
     b.price!.exShowroom.amount < a.price!.exShowroom.amount ? b : a,
   );
-  return `${versions.length > 1 ? 'From ' : ''}${lowest.price!.exShowroom.display}*`;
+  return `Starting at ${lowest.price!.exShowroom.display}*`;
 }
 
 /* ------------------------------------------------------------------ */

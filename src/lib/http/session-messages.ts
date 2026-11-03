@@ -4,5 +4,4 @@
  * again, so the two never say different things. No server imports: the
  * browser bundle reads this too.
  */
-export const SESSION_EXPIRED_MESSAGE =
-  'For your security, your session timed out. Please verify your number again.';
+export const SESSION_EXPIRED_MESSAGE = 'Your session has expired. Please restart your inquiry.';

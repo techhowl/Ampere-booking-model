@@ -252,6 +252,36 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabl
     window.location.reload();
   }, []);
 
+  // "Change location" from the dealer step: the same verified lead, another
+  // pincode. The pincode effects above then refetch prices and dealers.
+  const changePincode = useCallback(
+    async (next: string): Promise<string | null> => {
+      try {
+        const res = await fetch('/api/leads/pincode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+          body: JSON.stringify({ pincode: next }),
+        });
+        if (res.status === 401) {
+          expire();
+          return null;
+        }
+        const body = (await res.json().catch(() => null)) as {
+          lead?: LeadCreatedResponse;
+          message?: string;
+        } | null;
+        if (res.ok && body?.lead) {
+          setLead(body.lead);
+          return null;
+        }
+        return body?.message ?? 'Something went wrong. Please try again.';
+      } catch {
+        return 'We couldn’t process your request. Please try again in a moment.';
+      }
+    },
+    [expire],
+  );
+
   /* ---------------------------------------------------------------- */
   /* Focus and scroll                                                  */
   /* ---------------------------------------------------------------- */
@@ -343,6 +373,8 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabl
     case 'dealer':
       content = lead && (
         <DealerStep
+          // A new pincode is a new list: start the step afresh.
+          key={lead.pincode}
           pincode={lead.pincode}
           cached={nearby}
           onLoaded={setNearby}
@@ -353,6 +385,7 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabl
           }}
           onExpired={expire}
           onBack={() => go('scooter')}
+          onChangePincode={changePincode}
         />
       );
       break;

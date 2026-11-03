@@ -133,7 +133,14 @@ export function SiteFooter() {
           ))}
         </div>
 
-        <div className="mt-12 flex flex-col gap-3 sm:flex-row sm:justify-end">
+        <div className="mt-12 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-[15px] font-semibold">Need assistance? We’re here to help.</p>
+            <p className="mt-1 max-w-[46ch] text-[13px] leading-relaxed text-white/60">
+              Contact our customer support team for assistance with your enquiry.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
           <a
             href="https://ampere-electric.com/contact-us"
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/20 px-5 text-[13px] font-semibold uppercase tracking-wide transition-colors hover:bg-white/10"
@@ -146,11 +153,12 @@ export function SiteFooter() {
           >
             Speak to customer service
           </a>
+          </div>
         </div>
 
         <p className="mt-10 border-t border-white/10 pt-6 text-[12px] leading-relaxed text-white/40">
-          © {new Date().getFullYear()} Greaves Electric Mobility. Prices shown are
-          ex-showroom and vary by state.
+          © {new Date().getFullYear()} Greaves Electric Mobility. All prices are ex-showroom and
+          may vary depending on your location. Additional charges may apply.
         </p>
       </div>
     </footer>

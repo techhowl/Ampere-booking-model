@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
 import { catalogForPincode } from '@/lib/catalog/availability';
 import { isValidPincode } from '@/lib/phone-format';
+import { PINCODE_INVALID_MESSAGE } from '@/lib/schemas/lead';
 
 /**
  * GET /api/catalog?pincode=560001
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
 
   if (pincode && !isValidPincode(pincode)) {
     return NextResponse.json(
-      { error: 'invalid_pincode', message: 'Enter a valid 6-digit pincode' },
+      { error: 'invalid_pincode', message: PINCODE_INVALID_MESSAGE },
       { status: 400 },
     );
   }

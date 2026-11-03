@@ -157,7 +157,7 @@ export function BuyBranch({ model, colourCode, dealer, onExpired, onBack }: Prop
       setError(body?.message ?? 'We could not start your payment. Please try again.');
       setSubmitting(false);
     } catch {
-      setError('We could not reach our servers. Check your connection and try again.');
+      setError('We couldn’t process your request. Please try again in a moment.');
       setSubmitting(false);
     }
     // On success the button stays busy until the browser has left the page.

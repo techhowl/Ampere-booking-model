@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { isValidPhone, isValidPincode } from '@/lib/phone-format';
-import type { LeadCreatedResponse } from '@/lib/schemas/lead';
+import { PHONE_INVALID_MESSAGE, PINCODE_INVALID_MESSAGE, type LeadCreatedResponse } from '@/lib/schemas/lead';
 import type { OtpRequestResponse } from '@/lib/schemas/otp';
 import type { NearbyDealersResponse } from '@/lib/schemas/dealer';
 import { Checkbox, Field, Notice, PrimaryButton, inputClass } from '@/components/ui';
@@ -44,6 +44,11 @@ interface Props {
   /** "Not you?" — forget this browser's lead entirely. */
   onStartOver?: () => void;
 }
+
+/** From Ampere's copy document, step one. */
+const EYEBROW = 'Let’s get started';
+const TITLE = 'Your journey with Ampere starts here.';
+const NETWORK_ERROR = 'We couldn’t process your request. Please try again in a moment.';
 
 type FieldErrors = Partial<
   Record<'name' | 'phone' | 'pincode', string>
@@ -156,7 +161,7 @@ export function IdentityStep({
       if (body?.retryAfterSeconds) setCooldown(body.retryAfterSeconds);
       setOtpError(body?.message ?? 'We could not send a code. Please try again.');
     } catch {
-      setOtpError('We could not reach our servers. Check your connection.');
+      setOtpError(NETWORK_ERROR);
     } finally {
       setBusy(false);
     }
@@ -167,9 +172,9 @@ export function IdentityStep({
     setFormError(null);
 
     const found: FieldErrors = {};
-    if (name.trim().length < 2) found.name = 'Please enter your full name';
-    if (!isValidPhone(phone)) found.phone = 'Enter a valid 10-digit mobile number';
-    if (!isValidPincode(pincode)) found.pincode = 'Enter a valid 6-digit pincode';
+    if (name.trim().length < 2) found.name = 'Please enter your full name.';
+    if (!isValidPhone(phone)) found.phone = PHONE_INVALID_MESSAGE;
+    if (!isValidPincode(pincode)) found.pincode = PINCODE_INVALID_MESSAGE;
     setErrors(found);
     if (Object.keys(found).length > 0) return;
 
@@ -206,7 +211,7 @@ export function IdentityStep({
       if (body?.fields) setErrors(body.fields as FieldErrors);
       else setFormError(body?.message ?? 'Something went wrong. Please try again.');
     } catch {
-      setFormError('We could not reach our servers. Check your connection and try again.');
+      setFormError(NETWORK_ERROR);
     } finally {
       setSubmitting(false);
     }
@@ -246,7 +251,7 @@ export function IdentityStep({
       );
       setCode('');
     } catch {
-      setOtpError('We could not reach our servers. Check your connection.');
+      setOtpError(NETWORK_ERROR);
     } finally {
       setBusy(false);
     }
@@ -271,8 +276,9 @@ export function IdentityStep({
   return (
     <div className="flex flex-col gap-7">
       <StepHeader
-        title="Let’s Get to Know You"
-        text="Enter your details to continue with your Ampere booking."
+        eyebrow={EYEBROW}
+        title={TITLE}
+        text="A smarter way to move begins with a few simple details. Tell us a little about yourself to discover your Ampere experience."
       />
 
       {notice && <Notice>{notice}</Notice>}
@@ -294,7 +300,7 @@ export function IdentityStep({
             autoComplete="name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="As on your ID"
+            placeholder="Enter your full name"
             disabled={locked}
             className={inputClass(!!errors.name)}
             aria-invalid={!!errors.name}
@@ -319,7 +325,7 @@ export function IdentityStep({
               // ever given its last four digits.
               value={locked && !phone && lead ? `•••••• ${lead.phoneLast4}` : phone}
               onChange={(e) => setPhone(e.target.value.replace(/[^\d\s+]/g, ''))}
-              placeholder="10-digit mobile number"
+              placeholder="Enter your 10-digit mobile number"
               disabled={locked}
               className={`${inputClass(!!errors.phone)} pl-17`}
               aria-invalid={!!errors.phone}
@@ -330,19 +336,19 @@ export function IdentityStep({
         {/* Consent, at step one, under the phone field. Two purposes,
             recorded independently. Being contacted about the enquiry is the
             point of the form, so it is a notice the customer agrees to by
-            pressing Send OTP — said plainly, here, before they press it — and
+            pressing Continue — said plainly, here, before they press it — and
             recorded with its version like the marketing one. Marketing stays
             a box nobody has ticked for them. */}
         {!locked && (
           <fieldset className="-mt-1 flex flex-col gap-1.5 rounded-xl bg-amp-page/70 px-3.5 py-2.5">
             <legend className="sr-only">How we may contact you</legend>
             <p className="text-[12px] leading-relaxed text-amp-muted">
-              By continuing, you agree that Ampere and its dealers may contact you about this
-              enquiry.
+              By continuing, you agree that Ampere and its authorised dealers may contact you
+              regarding your enquiry.
             </p>
             <Checkbox checked={marketing} onChange={setMarketing}>
-              Send me offers and product news.{' '}
-              <span className="text-amp-muted">Optional</span>
+              Keep me updated with the latest Ampere launches, offers and experiences.{' '}
+              <span className="text-amp-muted">(Optional)</span>
             </Checkbox>
           </fieldset>
         )}
@@ -357,7 +363,7 @@ export function IdentityStep({
               maxLength={6}
               value={pincode}
               onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))}
-              placeholder="Where do you stay?"
+              placeholder="Enter your 6-digit pincode"
               disabled={locked}
               className={`${inputClass(!!errors.pincode)} pr-11`}
               aria-invalid={!!errors.pincode}
@@ -372,11 +378,21 @@ export function IdentityStep({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <label htmlFor={codeId} className="text-[14px] font-semibold text-amp-ink">
-                  {needsCode ? 'Verify your number' : 'Enter verification code'}
+                  Let’s verify your number.
                 </label>
                 <p className="mt-0.5 text-[13px] text-amp-muted">
-                  {needsCode ? 'We’ll text a 6-digit code to' : 'Sent by SMS to'} +91 ••••••
-                  {lead.phoneLast4}
+                  {needsCode ? (
+                    <>
+                      We’ll text a 6-digit code to{' '}
+                      <span className="whitespace-nowrap">+91 ••••••{lead.phoneLast4}</span>.
+                    </>
+                  ) : (
+                    <>
+                      We’ve sent a verification code to{' '}
+                      <span className="whitespace-nowrap">+91 ••••••{lead.phoneLast4}</span>. Enter the
+                      code to continue.
+                    </>
+                  )}
                 </p>
               </div>
               <button
@@ -384,7 +400,7 @@ export function IdentityStep({
                 onClick={editDetails}
                 className="shrink-0 cursor-pointer rounded-md px-1 text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-amp-accent"
               >
-                Change number
+                Edit Mobile Number
               </button>
             </div>
 
@@ -398,34 +414,37 @@ export function IdentityStep({
                 maxLength={6}
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                placeholder="••••••"
-                className={`${inputClass(!!otpError)} text-center text-[22px] font-semibold tracking-[0.5em] placeholder:tracking-[0.5em]`}
+                placeholder="Enter 6-digit OTP"
+                className={`${inputClass(!!otpError)} text-center text-[22px] font-semibold tracking-[0.5em] placeholder:text-[15px] placeholder:font-normal placeholder:tracking-normal`}
                 aria-invalid={!!otpError}
                 aria-describedby={`${codeId}-status`}
               />
             )}
 
             {/* Nothing to say yet before a code is sent, so no empty line. */}
-            {(!needsCode || otpError || otpNotice) && (
-              <div id={`${codeId}-status`} className="flex items-center justify-between gap-3 text-[13px]">
+            {(otpError || otpNotice) && (
+              <div id={`${codeId}-status`} className="text-[13px]">
                 {otpError ? (
                   <p role="alert" className="text-red-600">
                     {otpError}
                   </p>
                 ) : (
-                  <p className="text-amp-muted">{otpNotice ?? <>&nbsp;</>}</p>
-                )}
-                {!needsCode && (
-                  <button
-                    type="button"
-                    onClick={() => void sendCode()}
-                    disabled={cooldown > 0 || busy}
-                    className="shrink-0 cursor-pointer rounded-md px-1 font-semibold text-amp-accent-fill transition-colors hover:text-amp-accent-dark focus-visible:outline-2 focus-visible:outline-amp-accent disabled:cursor-not-allowed disabled:font-medium disabled:text-amp-muted"
-                  >
-                    {cooldown > 0 ? `Resend in ${formatCooldown(cooldown)}` : 'Resend OTP'}
-                  </button>
+                  <p className="text-amp-muted">{otpNotice}</p>
                 )}
               </div>
+            )}
+            {!needsCode && (
+              <p className="text-[13px] text-amp-muted">
+                Didn’t receive the code?{' '}
+                <button
+                  type="button"
+                  onClick={() => void sendCode()}
+                  disabled={cooldown > 0 || busy}
+                  className="cursor-pointer rounded-md px-0.5 font-semibold text-amp-accent-fill transition-colors hover:text-amp-accent-dark focus-visible:outline-2 focus-visible:outline-amp-accent disabled:cursor-not-allowed disabled:font-medium disabled:text-amp-muted"
+                >
+                  {cooldown > 0 ? `Resend OTP in ${formatCooldown(cooldown)}` : 'Resend OTP'}
+                </button>
+              </p>
             )}
           </div>
         )}
@@ -438,11 +457,13 @@ export function IdentityStep({
             loading={submitting || (busy && !!lead && (needsCode || code.length === 6))}
             disabled={busy || (!!lead && !needsCode && code.length !== 6) || (needsCode && cooldown > 0)}
           >
-            {!lead || needsCode
-              ? needsCode && cooldown > 0
-                ? `Send OTP in ${formatCooldown(cooldown)}`
-                : 'Send OTP'
-              : 'Verify & Continue'}
+            {!lead
+              ? 'Continue'
+              : needsCode
+                ? cooldown > 0
+                  ? `Send OTP in ${formatCooldown(cooldown)}`
+                  : 'Send OTP'
+                : 'Verify & Continue'}
           </PrimaryButton>
         </StepActions>
 
@@ -476,7 +497,7 @@ export function VerifiedDetails({
 }) {
   return (
     <div className="flex flex-col gap-7">
-      <StepHeader title="Let’s Get to Know You" text="Your number is verified. You’re all set." />
+      <StepHeader eyebrow={EYEBROW} title={TITLE} text="Your number is verified. Let’s move ahead!" />
 
       <div className="flex items-center gap-4 rounded-2xl border border-amp-line bg-white p-4">
         <span

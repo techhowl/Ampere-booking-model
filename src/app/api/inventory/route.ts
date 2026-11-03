@@ -4,6 +4,7 @@ import { getAvailable } from '@/lib/inventory/inventory';
 import { resolvePincode } from '@/lib/dealers/resolve';
 import { isValidModelCode } from '@/lib/catalog/catalog';
 import { isValidPincode } from '@/lib/phone-format';
+import { PINCODE_INVALID_MESSAGE } from '@/lib/schemas/lead';
 
 /**
  * GET /api/inventory?model=nexus-ex-plus&pincode=560001
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
   }
   if (!isValidPincode(pincode)) {
     return NextResponse.json(
-      { error: 'invalid_pincode', message: 'Enter a valid 6-digit pincode' },
+      { error: 'invalid_pincode', message: PINCODE_INVALID_MESSAGE },
       { status: 400 },
     );
   }

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { findNearbyDealers } from '@/lib/dealers/nearby';
 import { isValidPincode } from '@/lib/phone-format';
 import type { NearbyDealersResponse } from '@/lib/schemas/dealer';
+import { PINCODE_INVALID_MESSAGE } from '@/lib/schemas/lead';
 
 /**
  * GET /api/dealers/nearby?pincode=560038
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
 
   if (!isValidPincode(pincode)) {
     return NextResponse.json(
-      { error: 'invalid_pincode', message: 'Enter a valid 6-digit pincode' },
+      { error: 'invalid_pincode', message: PINCODE_INVALID_MESSAGE },
       { status: 400 },
     );
   }

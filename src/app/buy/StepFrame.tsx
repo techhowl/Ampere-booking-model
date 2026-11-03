@@ -13,9 +13,27 @@ import { FOCUS } from '@/components/ui';
  * on a button that no longer exists.
  */
 
-export function StepHeader({ title, text }: { title: string; text?: ReactNode }) {
+/** The small capitals line above a step's heading: "LET'S GET STARTED". */
+export function Eyebrow({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-amp-accent-fill">
+      {children}
+    </p>
+  );
+}
+
+export function StepHeader({
+  eyebrow,
+  title,
+  text,
+}: {
+  eyebrow?: string;
+  title: string;
+  text?: ReactNode;
+}) {
   return (
     <header className="flex flex-col gap-1.5">
+      {eyebrow && <Eyebrow>{eyebrow}</Eyebrow>}
       <h2
         tabIndex={-1}
         data-step-heading
@@ -30,9 +48,11 @@ export function StepHeader({ title, text }: { title: string; text?: ReactNode })
 
 export function StepActions({
   onBack,
+  backLabel = 'Back',
   children,
 }: {
   onBack?: () => void;
+  backLabel?: string;
   /** The primary action. Takes the remaining width. */
   children: ReactNode;
 }) {
@@ -49,7 +69,7 @@ export function StepActions({
           ].join(' ')}
         >
           <ArrowLeftIcon className="size-4" />
-          Back
+          {backLabel}
         </button>
       )}
       <div className="flex min-w-0 flex-1 flex-col [&>button]:w-full">{children}</div>
