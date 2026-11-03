@@ -60,4 +60,5 @@ docs/handover/*(v[0-9]).docx
 # live in .env / the host's environment; this file must never be committed.
 Sandbox - Lead Creation API Collection for Website.json
 *.postman_collection.json
+/*[Cc]ollection*.json
 Greaves CRM.Next -Website Lead APIs.pdf

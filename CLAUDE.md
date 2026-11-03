@@ -86,4 +86,7 @@ come after Greaves' go-live approval. Zoho ids are per environment — data in
   (`priceBook.partialMode` + `partialValue`); the option is hidden when null.
 - Region definitions (which states map to which region) are not yet supplied.
   Inventory is keyed on region, so use seeded placeholder data for now.
-- The dealer master and pincode mapping are not yet supplied. Seed placeholders.
+- The dealer master comes from the CRM: `pnpm crm sync-dealers` (Greaves'
+  `get_dealers`). It has no street address, phone or coordinates yet; dealers
+  are placed at their pincode's centre. The pincode-to-region mapping is
+  still placeholder data.

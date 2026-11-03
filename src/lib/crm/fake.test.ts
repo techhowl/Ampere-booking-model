@@ -26,10 +26,13 @@ const ride = (phone: string, over: Record<string, string> = {}) => ({
 describe('FakeCrmClient', () => {
   it('refuses the same mobile within 90 days, however it is written', async () => {
     const crm = new FakeCrmClient();
-    expect((await crm.createLead(lead('+919000012345'))).kind).toBe('accepted');
-    expect(await crm.createLead(lead('9000012345'))).toMatchObject({
+    const first = await crm.createLead(lead('+919000012345'));
+    expect(first.kind).toBe('accepted');
+    expect(await crm.createLead(lead('9000012345'))).toEqual({
       kind: 'rejected',
-      message: 'Duplicate Lead: Lead already exists in the system',
+      category: 'rule_failure',
+      message: 'Duplicate Lead: Active Lead already exists in the system',
+      leadId: first.kind === 'accepted' ? first.leadId : 'x',
     });
   });
 

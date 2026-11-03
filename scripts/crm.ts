@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { MODELS } from '../src/lib/catalog/catalog';
 import { crmSettings } from '../src/lib/crm/config';
+import { syncDealers } from '../src/lib/crm/dealers';
 import { FakeCrmClient } from '../src/lib/crm/fake';
 import { reconcileMissingJobs, requeueDeadJobs, runDueJobs } from '../src/lib/crm/jobs';
 import { buildLeadRecord, buildTestRideRecord, crmSlotStart } from '../src/lib/crm/payload';
@@ -17,6 +18,8 @@ import { ZohoCrmClient } from '../src/lib/crm/zoho';
  *   pnpm crm send                      send everything due now (what the cron does)
  *   pnpm crm requeue [jobId ...]       dead jobs get a fresh set of attempts
  *   pnpm crm sync-models               read the CRM's vehicle ids into crm_vehicle_models
+ *   pnpm crm sync-dealers [--dry-run] [--force]
+ *                                      make our dealers match the CRM's dealer master
  *   pnpm crm link-dealer <code> <id>   set one dealer's CRM account id
  *   pnpm crm smoke                     SANDBOX ONLY: one real lead + test ride, end to end
  *
@@ -118,6 +121,22 @@ async function syncModels(): Promise<void> {
   }
 }
 
+async function syncDealerMaster(args: string[]): Promise<void> {
+  const dryRun = args.includes('--dry-run');
+  const { dealers, skipped } = await zohoClient().listDealers();
+  console.log(`The CRM lists ${dealers.length} active dealer(s).`);
+  for (const s of skipped) console.log(`  skipped row ${s.row}: ${s.reason}`);
+
+  const summary = await syncDealers(prisma, dealers, { dryRun, force: args.includes('--force') });
+  console.log(`${dryRun ? 'Would create' : 'Created'} ${summary.created}, ${dryRun ? 'would update' : 'updated'} ${summary.updated}.`);
+  console.log(`${dryRun ? 'Would retire' : 'Retired'} ${summary.retired.length} dealer(s) not in the CRM list${summary.retired.length ? `: ${summary.retired.join(', ')}` : '.'}`);
+  if (summary.unlocated.length) {
+    console.log(`\n${summary.unlocated.length} dealer(s) whose pincode has no location, so no radius search finds them:`);
+    for (const d of summary.unlocated) console.log(`  ${d.pincode}  ${d.name}  (${d.code})`);
+  }
+  if (dryRun) console.log('\nDry run: nothing was changed.');
+}
+
 async function linkDealer(dealerCode: string | undefined, crmId: string | undefined): Promise<void> {
   if (!dealerCode || !crmId || !/^\d{10,30}$/.test(crmId)) {
     throw new Error('Usage: pnpm crm link-dealer <dealerCode> <crm account id (digits)>');
@@ -188,12 +207,16 @@ async function main(): Promise<void> {
       return requeue(args);
     case 'sync-models':
       return syncModels();
+    case 'sync-dealers':
+      return syncDealerMaster(args);
     case 'link-dealer':
       return linkDealer(args[0], args[1]);
     case 'smoke':
       return smoke();
     default:
-      console.log('Usage: pnpm crm <status | send | requeue [id...] | sync-models | link-dealer <code> <id> | smoke>');
+      console.log(
+        'Usage: pnpm crm <status | send | requeue [id...] | sync-models | sync-dealers [--dry-run] [--force] | link-dealer <code> <id> | smoke>',
+      );
       process.exitCode = 1;
   }
 }

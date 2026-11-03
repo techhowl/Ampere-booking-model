@@ -23,6 +23,8 @@ export interface ZohoConfig {
   refreshToken: string;
   leadFunction: string;
   testRideFunction: string;
+  /** Greaves' dealer master: every active dealer, for `pnpm crm sync-dealers`. */
+  dealersFunction: string;
   /** Per request. The sandbox has taken 16 seconds to answer. */
   timeoutMs: number;
 }
@@ -36,6 +38,7 @@ type Source = Record<string, string | undefined>;
 const DEFAULT_ACCOUNTS_URL = 'https://accounts.zoho.in';
 const DEFAULT_LEAD_FUNCTION = 'leadcreation_for_ampere_website';
 const DEFAULT_TEST_RIDE_FUNCTION = 'test_ride_creation_for_ampere_website';
+const DEFAULT_DEALERS_FUNCTION = 'get_dealers';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 function required(source: Source, name: string): string {
@@ -79,6 +82,7 @@ export function crmSettings(source: Source = process.env): CrmSettings {
     refreshToken: required(source, 'ZOHO_REFRESH_TOKEN'),
     leadFunction: source.ZOHO_LEAD_FUNCTION?.trim() || DEFAULT_LEAD_FUNCTION,
     testRideFunction: source.ZOHO_TEST_RIDE_FUNCTION?.trim() || DEFAULT_TEST_RIDE_FUNCTION,
+    dealersFunction: source.ZOHO_DEALERS_FUNCTION?.trim() || DEFAULT_DEALERS_FUNCTION,
     timeoutMs: Number.isFinite(timeout) && timeout >= 1000 ? timeout : DEFAULT_TIMEOUT_MS,
   };
 

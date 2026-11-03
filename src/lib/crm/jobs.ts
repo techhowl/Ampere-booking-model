@@ -419,10 +419,20 @@ async function processLead(context: Context): Promise<Step> {
       }
       return done('created', { crmLeadId: leadId });
     }
-    case 'duplicate':
-      // The CRM already has this mobile from the last 90 days. Nothing lost:
-      // a test ride for it attaches to that existing lead.
-      return done('duplicate');
+    case 'duplicate': {
+      // The CRM already has an active lead for this mobile. Nothing lost. The
+      // answer names that lead, so keep it: this customer's test rides then go
+      // to it by id, and a ride that times out can be looked up before it is
+      // sent again. Same fences as a created lead.
+      const existing = (result as Extract<CrmResult, { kind: 'rejected' }>).leadId;
+      if (existing) {
+        await prisma.lead.updateMany({
+          where: { id: lead.id, crmLeadId: null, phoneHash: lead.phoneHash },
+          data: { crmLeadId: existing },
+        });
+      }
+      return done('duplicate', { crmLeadId: existing });
+    }
     case 'missing_fields':
       return dead(errorOf(result));
     default:
@@ -556,6 +566,8 @@ async function linkRide(
 function rideOutcome(message: string): string {
   const text = message.toLowerCase();
   if (text.startsWith('existing lead updated')) return 'linked';
+  // The same answer, as worded since 2026-11-03.
+  if (text.startsWith('test ride created and mapped to the existing lead')) return 'linked';
   if (text.startsWith('duplicate lead')) return 'mapped_to_existing_lead';
   return 'created';
 }

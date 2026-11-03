@@ -1,4 +1,5 @@
 import { isSandboxHost, type ZohoConfig } from './config';
+import { DealerListError, parseDealerList, type DealerList } from './dealers';
 import type { CallOptions, CrmClient, CrmRecord, CrmResult } from './types';
 
 /**
@@ -136,6 +137,8 @@ export function parseFunctionResponse(status: number, body: string): CrmResult {
       kind: 'rejected',
       category: String(result.category ?? ''),
       message: String(result.message ?? ''),
+      // Create Lead's "Duplicate Lead" names the existing lead this way.
+      leadId: idFrom(output, 'Existing_lead_id') ?? idFrom(output, 'lead_id'),
     };
   }
   return { kind: 'unreachable', reason: 'unexpected_output', ambiguous: true };
@@ -229,6 +232,20 @@ export class ZohoCrmClient implements CrmClient {
     const rows = recordsOf(exchange.body);
     if (!rows) throw new Error('Vehicle_Models: unreadable response');
     return rows.map((row) => ({ id: row.id, name: typeof row.Name === 'string' ? row.Name : '' }));
+  }
+
+  /**
+   * Greaves' dealer master, for `pnpm crm sync-dealers`. A read: the function
+   * is called with GET and no arguments.
+   */
+  async listDealers(): Promise<DealerList> {
+    const exchange = await this.authorised(
+      `${this.config.apiUrl}/crm/v7/functions/${encodeURIComponent(this.config.dealersFunction)}/actions/execute?auth_type=oauth`,
+      { method: 'GET' },
+    );
+    if (exchange.kind === 'token') throw new ZohoTokenError(exchange.code);
+    if (exchange.kind === 'network') throw new DealerListError(`get_dealers: ${exchange.reason}`);
+    return parseDealerList(exchange.status, exchange.body);
   }
 
   private async execute(functionName: string, record: CrmRecord, options: CallOptions): Promise<CrmResult> {

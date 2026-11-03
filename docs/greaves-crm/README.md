@@ -8,8 +8,8 @@ client secret): `Greaves CRM.Next -Website Lead APIs.pdf` and the Postman
 collection `Sandbox - Lead Creation API Collection for Website.json`.
 
 Everything below marked *observed* was tested against the sandbox on
-2026-11-02. Where the PDF and the sandbox disagree, the code follows the
-sandbox.
+2026-11-02, and again on 2026-11-03 after Greaves' changes. Where the PDF and
+the sandbox disagree, the code follows the sandbox.
 
 ## How it works
 
@@ -63,20 +63,24 @@ raw response text. The sandbox accepts string ids.
 | Case | What the sandbox did |
 |---|---|
 | New lead | `Lead created successfully` + `lead_id` |
-| Same mobile again (90 days) | `rule_failure: Duplicate Lead…`. Matched with or without `+91`. |
-| Test ride, existing `Zoho_CRM_Lead_ID` | `Existing Lead updated and Test Ride created` |
+| Same mobile again (90 days) | `rule_failure: Duplicate Lead: Active Lead already exists in the system` + **`Existing_lead_id`** (since 3 Nov; before, no id). Matched with or without `+91`. Greaves: a note is added to the existing lead. We keep the id. |
+| Create Lead for a customer whose lead a test ride made | Duplicate, as above (3 Nov; on 2 Nov it made a second lead) |
+| Test ride, existing `Zoho_CRM_Lead_ID` | `Test Ride created and mapped to the existing Lead` (3 Nov wording; was `Existing Lead updated and Test Ride created`) |
 | Test ride, known mobile, no lead id | `Duplicate Lead already exists. Test Ride created and mapped to the existing active Lead` |
-| Test ride, new mobile | `New Lead and Test Ride created` |
+| Test ride, new mobile, no dealer, served pincode | `New Lead and Test Ride created`; the CRM picks the dealer |
+| **Test ride, new mobile, WITH a dealer** | **`api_failure: Lead creation failed due to technical reasons`, every time (3 Nov).** Worked on 2 Nov. Our normal order (lead first, ride with its id) avoids this path. |
+| **Customer pincode the CRM does not serve** (e.g. 560038), with or without a dealer | **Refused.** Create Lead: `api_failure: …technical reasons` (no dealer) or `rule_failure: Invalid Pincode` (with one). Test ride: `api_failure: Pincode validation failed…`. The CRM checks the customer's pincode against its own `Dealer_Service_Locations` (a 15 km search), not the dealer we send. Raised with Greaves. |
 | Unknown `Zoho_CRM_Lead_ID` | `rule_failure: Provided Zoho CRM Lead ID is not available` → we drop the id and resend |
 | **Same test ride sent twice** | **Two test rides.** No idempotency. See "Retries" below. |
 | Time slot `01:00 PM - 03:00 PM`, `1:00 PM - 3:00 PM`, `1:00 PM – 3:00 PM` | All stored 13:00 IST. `Time_Slot` is stored verbatim, so the page itself uses Greaves' `hh:mm AM - hh:mm PM`. |
 | Date not `dd/MM/yyyy` | `Mandatory fields are missing` (misleading) |
 | Vehicle missing on a test ride | `Mandatory fields are missing` |
 | **Suspended dealer** (e.g. "Asha Ampere", the PDF's own example) | `api_failure: Lead creation failed due to technical reasons` |
-| **No dealer, pincode with no active dealer** | Same failure. Function crashes at line 446 and leaks its debug log (`userMessage`). |
-| No dealer, served pincode | CRM assigns the dealer itself |
+| No dealer, pincode with no active dealer | 2 Nov: crashed at line 446. 3 Nov: no crash, but refused as above, and `userMessage` still carries the debug log. |
+| No dealer, served pincode | CRM assigns the dealer itself (debug log still in `userMessage`) |
 | The PDF's sample ids (`1441684…`) | Not valid in this sandbox (ids there start `1456765…`) |
-| Dealer sent on a test ride | **Not stored on the Test Ride** (its `Branch` field stays empty) |
+| Dealer sent on a test ride | **Not visible on the Test Ride**: `Branch` is empty on every ride, 2 and 3 Nov, even minutes later and even when the CRM picked the dealer. Greaves say the showroom is set at creation; if it is another field, our API user cannot see it. Leads keep the dealer; Greaves assign the lead to it once they qualify it. |
+| `Is_There_Anything_We_Can_Help_You_With?` | A picklist; Greaves added `Brochure` (3 Nov). It is on the Lead, which our token cannot read, so we cannot check it ourselves. |
 | Latency | 0.4–4 s typically, one call took 16 s. Hence background sending. |
 
 ## Field mapping
@@ -100,8 +104,35 @@ raw response text. The sandbox accepts string ids.
 
 Ids differ between sandbox and production, so they are **data, not code**:
 `crm_vehicle_models` (filled by `pnpm crm sync-models`, which reads the CRM's
-own `Vehicle_Models`) and `dealers.crm_id` (to come with the dealer master;
+own `Vehicle_Models`) and `dealers` (filled by `pnpm crm sync-dealers`, below;
 `pnpm crm link-dealer` for one-offs). The seed fills both with **sandbox** ids.
+
+## The dealer master
+
+Greaves' `get_dealers` function (GET, no arguments; `ZOHO_DEALERS_FUNCTION`
+to rename it) lists every active dealer: `dealer_name`, `dealer_id`, `city`,
+`state`, `pincode`. Nothing else yet: no street address, phone or
+coordinates. On 3 Nov the sandbox listed 441 dealers in 26 states.
+
+`pnpm crm sync-dealers [--dry-run]` (`src/lib/crm/dealers.ts`) makes our
+`dealers` table match it:
+
+- each dealer is created or updated as `GEM-<dealer_id>`, active
+- its location is its pincode's centre from `pincode_geo`, good to a couple of
+  km. 14 of the sandbox's 432 dealer pincodes have no location (India Post's
+  own data for them is wrong or missing); those dealers are listed by the sync
+  and no radius search finds them until they get a location
+- the card shows "City, State PIN" until Greaves send an address, and our
+  customer-care number until they send a phone. A sync never clears a phone
+  or home-ride flag we set ourselves
+- every other dealer, placeholders included, is retired (`active = false`),
+  never deleted. A list that would retire more than half the CRM dealers we
+  hold is refused as broken unless `--force`; so is a list that says it holds
+  more dealers than it sent
+
+Two pairs look like the same showroom entered twice (`JAI SHRI RAM MOTORS` and
+`Jai Shri Ram Motors` at 642126; `SANDIP ENTERPRISES` and `SANDEEP ENTERPRISE`
+at 736101). Both show as they are; raised with Greaves.
 
 ## Retries, and why a test ride is never sent twice blindly
 
@@ -114,10 +145,11 @@ nuisance for the dealer; a lost ride is a customer turned away.
 
 Leads need no look-up. The CRM refuses a second lead for the same mobile.
 
-The look-up needs our copy of the CRM lead id. After a "Duplicate Lead" answer
-we have none until a ride returns one, so a ride that times out for such a
-customer is sent again unchecked. Greaves have been asked to return the
-existing lead's id with the duplicate answer. Our token cannot read Leads.
+The look-up needs our copy of the CRM lead id. Since 3 Nov a "Duplicate
+Lead" answer names the existing lead (`Existing_lead_id`), and we keep it, so
+a returning customer's rides are sent to that lead by id and can be looked up.
+If a duplicate answer ever names no lead, a ride that times out for that
+customer is sent again unchecked. Our token cannot read Leads.
 
 ## Rules the queue keeps
 
@@ -157,6 +189,7 @@ pnpm crm status          # queued / retrying / dead jobs, unmapped models and de
 pnpm crm send            # send everything due now
 pnpm crm requeue [id…]   # dead jobs get a fresh run, once the cause is fixed
 pnpm crm sync-models     # read vehicle ids from the CRM
+pnpm crm sync-dealers    # make our dealers match the CRM's dealer master (--dry-run first)
 pnpm crm link-dealer AMP-S-001 1456765000001717131
 pnpm crm smoke           # sandbox only: one real lead + ride + look-up
 ```
@@ -169,4 +202,6 @@ warning on every boot.
 
 Every record we created has the name **"TEST Ampere Website (ignore)"**, a
 mobile in the **+91 90000 xxxxx** range, and `utm_campaign` of
-`sandbox_integration_test` or `crm_e2e`. Greaves can delete them by any of those.
+`sandbox_integration_test`, `crm_e2e`, `sandbox_retest_3nov` or `crm_e2e_3nov`.
+Greaves can delete them by any of those. (Greaves deleted the 2 Nov records on
+3 Nov.)

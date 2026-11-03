@@ -211,11 +211,41 @@ describe('a lead', () => {
     expect((await job(jobId)).crmLeadId).toBe(lead.crmLeadId);
   });
 
-  it('accepts the CRM’s duplicate rule as done — nothing is lost', async () => {
-    await crm.createLead({ Name: 'x', Phone: PHONE, Pincode: '560064', Website_Lead_ID: 'other' });
+  it('accepts the CRM’s duplicate rule as done, and keeps the existing lead it names', async () => {
+    const existing = await crm.createLead({ Name: 'x', Phone: PHONE, Pincode: '560064', Website_Lead_ID: 'other' });
+    const existingId = existing.kind === 'accepted' ? existing.leadId : 'x';
+    const leadId = await makeLead();
+    const jobId = (await enqueueLeadSync(prisma, leadId))!;
+
+    expect(await run(jobId)).toMatchObject({ state: 'done', outcome: 'duplicate' });
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId).toBe(existingId);
+    expect((await job(jobId)).crmLeadId).toBe(existingId);
+  });
+
+  it('a duplicate that names no lead is still done, with nothing to keep', async () => {
+    const before = new FakeCrmClient(Date.now, false);
+    await before.createLead({ Name: 'x', Phone: PHONE, Pincode: '560064', Website_Lead_ID: 'other' });
     const leadId = await makeLead();
 
-    expect(await run((await enqueueLeadSync(prisma, leadId))!)).toMatchObject({ state: 'done', outcome: 'duplicate' });
+    expect(await run((await enqueueLeadSync(prisma, leadId))!, before)).toMatchObject({ state: 'done', outcome: 'duplicate' });
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId).toBeNull();
+  });
+
+  it('does not file a duplicate’s lead under a number the customer has since changed', async () => {
+    const leadId = await makeLead();
+    const jobId = (await enqueueLeadSync(prisma, leadId))!;
+    const changing = stub(async () => {
+      // The customer edits their number while the answer is on its way.
+      await prisma.lead.update({ where: { id: leadId }, data: { phoneHash: 'f'.repeat(64) } });
+      return {
+        kind: 'rejected',
+        category: 'rule_failure',
+        message: 'Duplicate Lead: Active Lead already exists in the system',
+        leadId: '1456765000001809001',
+      };
+    });
+
+    expect(await run(jobId, changing)).toMatchObject({ state: 'done', outcome: 'duplicate' });
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId).toBeNull();
   });
 
@@ -247,7 +277,7 @@ describe('a lead', () => {
 
   it('gives up after the last attempt, and can be given a fresh start', async () => {
     const jobId = (await enqueueLeadSync(prisma, await makeLead()))!;
-    const failing = stub(async () => ({ kind: 'rejected', category: 'api_failure', message: 'Lead creation failed due to technical reasons' }));
+    const failing = stub(async () => ({ kind: 'rejected', category: 'api_failure', message: 'Lead creation failed due to technical reasons', leadId: null }));
 
     let at = soon();
     for (let i = 1; i <= MAX_ATTEMPTS; i += 1) {
@@ -264,7 +294,7 @@ describe('a lead', () => {
 
   it('gives up at once when the CRM says fields are missing — retrying cannot help', async () => {
     const jobId = (await enqueueLeadSync(prisma, await makeLead()))!;
-    const result = await run(jobId, stub(async () => ({ kind: 'rejected', category: 'rule_failure', message: 'Mandatory fields are missing' })));
+    const result = await run(jobId, stub(async () => ({ kind: 'rejected', category: 'rule_failure', message: 'Mandatory fields are missing', leadId: null })));
     expect(result).toMatchObject({ state: 'dead' });
   });
 
@@ -282,6 +312,7 @@ describe('a lead', () => {
         kind: 'rejected',
         category: 'api_failure',
         message: 'Lead creation failed for +919876543210 (debug: Phone=9876543210)',
+        leadId: null,
       })),
     );
     const failed = await job(jobId);
@@ -367,13 +398,26 @@ describe('a test ride', () => {
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId).toMatch(/^\d{19}$/);
   });
 
-  it('after a duplicate lead, lands on the customer’s existing CRM lead and remembers it', async () => {
+  it('after a duplicate lead, sends the ride to the existing CRM lead by its id', async () => {
     const existing = await crm.createLead({ Name: 'x', Phone: PHONE, Pincode: '560064', Website_Lead_ID: 'older' });
+    const existingId = existing.kind === 'accepted' ? existing.leadId : 'x';
     const leadId = await makeLead();
-    await run((await enqueueLeadSync(prisma, leadId))!); // duplicate
+    await run((await enqueueLeadSync(prisma, leadId))!); // duplicate, naming the existing lead
     const rideId = await makeRide(leadId);
 
-    expect(await run((await enqueueTestRideSync(prisma, rideId))!)).toMatchObject({ outcome: 'mapped_to_existing_lead' });
+    expect(await run((await enqueueTestRideSync(prisma, rideId))!)).toMatchObject({ outcome: 'linked' });
+    expect(sent('test_ride')[0]!.Zoho_CRM_Lead_ID).toBe(existingId);
+    expect(crm.ridesOn(existingId!)).toHaveLength(1);
+  });
+
+  it('after a duplicate that names no lead, the CRM still maps the ride by number, and we remember it', async () => {
+    const before = new FakeCrmClient(Date.now, false);
+    const existing = await before.createLead({ Name: 'x', Phone: PHONE, Pincode: '560064', Website_Lead_ID: 'older' });
+    const leadId = await makeLead();
+    await run((await enqueueLeadSync(prisma, leadId))!, before);
+    const rideId = await makeRide(leadId);
+
+    expect(await run((await enqueueTestRideSync(prisma, rideId))!, before)).toMatchObject({ outcome: 'mapped_to_existing_lead' });
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId).toBe(
       existing.kind === 'accepted' ? existing.leadId : 'x',
     );

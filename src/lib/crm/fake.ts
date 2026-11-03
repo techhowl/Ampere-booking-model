@@ -4,10 +4,11 @@ import type { CrmClient, CrmRecord, CrmResult } from './types';
  * Greaves CRM.Next, in memory. Drives development and the test suite, the same
  * pattern as FakeJuspayClient.
  *
- * It copies what the sandbox was SEEN to do on 2026-11-02, not what the PDF
- * says, where the two differ:
+ * It copies what the sandbox was SEEN to do (2026-11-02, re-tested
+ * 2026-11-03), not what the PDF says, where the two differ:
  *
- *   - the same mobile within 90 days is a duplicate, whatever its spelling
+ *   - the same mobile within 90 days is a duplicate, whatever its spelling,
+ *     and the answer names the existing lead (Existing_lead_id)
  *   - a test ride for a known number attaches to that customer's active lead
  *   - an unknown Zoho_CRM_Lead_ID is refused
  *   - a date not in dd/MM/yyyy reads as "Mandatory fields are missing"
@@ -52,7 +53,12 @@ const accepted = (message: string, leadId: string, testRideId: string | null): C
   leadId,
   testRideId,
 });
-const rejected = (category: string, message: string): CrmResult => ({ kind: 'rejected', category, message });
+const rejected = (category: string, message: string, leadId: string | null = null): CrmResult => ({
+  kind: 'rejected',
+  category,
+  message,
+  leadId,
+});
 const MISSING = rejected('rule_failure', 'Mandatory fields are missing');
 
 export class FakeCrmClient implements CrmClient {
@@ -65,7 +71,11 @@ export class FakeCrmClient implements CrmClient {
   private readonly failures: Record<Method, FakeFailure[]> = { lead: [], test_ride: [], find: [] };
   private nextId = 9_100_000_000_000_000_000n;
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly now: () => number = Date.now,
+    /** False: a duplicate answer names no lead, as the sandbox did until 2026-11-03. */
+    private readonly duplicateNamesLead = true,
+  ) {}
 
   failNext(method: Method, ...failures: FakeFailure[]): void {
     this.failures[method].push(...failures);
@@ -78,8 +88,11 @@ export class FakeCrmClient implements CrmClient {
     if (failure === 'api_failure') return rejected('api_failure', 'Lead creation failed due to technical reasons');
 
     if (!record.Name || !record.Phone || !record.Pincode || !record.Website_Lead_ID) return MISSING;
-    if (this.activeLeadFor(record.Phone)) {
-      return rejected('rule_failure', 'Duplicate Lead: Lead already exists in the system');
+    const existing = this.activeLeadFor(record.Phone);
+    if (existing) {
+      return this.duplicateNamesLead
+        ? rejected('rule_failure', 'Duplicate Lead: Active Lead already exists in the system', existing.id)
+        : rejected('rule_failure', 'Duplicate Lead: Lead already exists in the system');
     }
 
     const lead = this.addLead(record.Phone);
@@ -103,7 +116,7 @@ export class FakeCrmClient implements CrmClient {
     if (record.Zoho_CRM_Lead_ID) {
       lead = this.leads.get(record.Zoho_CRM_Lead_ID);
       if (!lead) return rejected('rule_failure', 'Provided Zoho CRM Lead ID is not available');
-      message = 'Existing Lead updated and Test Ride created successfully';
+      message = 'Test Ride created and mapped to the existing Lead successfully';
     } else {
       lead = this.activeLeadFor(record.Phone ?? '');
       if (lead) {

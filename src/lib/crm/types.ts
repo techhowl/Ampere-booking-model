@@ -18,8 +18,12 @@ export type CrmRecord = Record<string, string>;
 export type CrmResult =
   /** The CRM did it. Ids are present whenever the CRM returned them. */
   | { kind: 'accepted'; message: string; leadId: string | null; testRideId: string | null }
-  /** The CRM answered, and the answer was no. */
-  | { kind: 'rejected'; category: string; message: string }
+  /**
+   * The CRM answered, and the answer was no. `leadId` is the customer's
+   * existing lead when the answer names one — a "Duplicate Lead" does, since
+   * 2026-11-03 — otherwise null.
+   */
+  | { kind: 'rejected'; category: string; message: string; leadId: string | null }
   /**
    * We have no answer. `ambiguous` means the request may still have landed —
    * a timeout, a dropped connection, a 5xx — so a retry could duplicate it.

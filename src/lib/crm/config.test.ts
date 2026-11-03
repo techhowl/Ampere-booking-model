@@ -35,6 +35,7 @@ describe('crmSettings', () => {
         apiUrl: 'https://sandbox.zohoapis.in',
         leadFunction: 'leadcreation_for_ampere_website',
         testRideFunction: 'test_ride_creation_for_ampere_website',
+        dealersFunction: 'get_dealers',
         timeoutMs: 30_000,
       },
     });

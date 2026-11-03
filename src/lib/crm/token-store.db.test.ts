@@ -20,6 +20,7 @@ const SANDBOX: ZohoConfig = {
   refreshToken: '1000.refresh',
   leadFunction: 'lead',
   testRideFunction: 'ride',
+  dealersFunction: 'dealers',
   timeoutMs: 1000,
 };
 

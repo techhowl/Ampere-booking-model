@@ -10,8 +10,9 @@ import {
 } from './zoho';
 
 /*
- * Response bodies recorded verbatim from Greaves' sandbox on 2026-11-02.
- * Every business answer is HTTP 200 with the result as a string inside it.
+ * Response bodies recorded verbatim from Greaves' sandbox on 2026-11-02 and,
+ * where it changed, 2026-11-03. Every business answer is HTTP 200 with the
+ * result as a string inside it.
  */
 const wrap = (output: string, extra = '') =>
   `{"code":"success","details":{"output":${JSON.stringify(output)}${extra},"output_type":"string","id":"600999000000022016"},"message":"function executed successfully"}`;
@@ -24,6 +25,10 @@ const SANDBOX = {
   rideNew: wrap('{"status":"success","category":"success","message":"New Lead and Test Ride created successfully","lead_id":"1456765000001731340","test_ride_id":"1456765000001736132"}'),
   rideExisting: wrap('{"status":"success","category":"success","message":"Existing Lead updated and Test Ride created successfully","lead_id":"1456765000001736114","test_ride_id":"1456765000001737120"}'),
   rideMapped: wrap('{"status":"success","category":"success","message":"Duplicate Lead already exists. Test Ride created and mapped to the existing active Lead successfully","lead_id":"1456765000001736154","test_ride_id":"1456765000001730167"}'),
+  // 2026-11-03: the duplicate answer now names the existing lead.
+  duplicateNamed: wrap('{"status":"failure","category":"rule_failure","message":"Duplicate Lead: Active Lead already exists in the system","Existing_lead_id":"1456765000001809001"}'),
+  rideOnLead: wrap('{"status":"success","category":"success","message":"Test Ride created and mapped to the existing Lead successfully","lead_id":"1456765000001809001","test_ride_id":"1456765000001808006"}'),
+  pincodeValidation: wrap('{"status":"failure","category":"api_failure","message":"Pincode validation failed due to technical reasons"}'),
   notAvailable: wrap('{"status":"failure","category":"rule_failure","message":"Provided Zoho CRM Lead ID is not available"}'),
   // Greaves' function leaks its debug log on some paths. Extra keys are ignored.
   withDebugLog: wrap(
@@ -48,6 +53,7 @@ describe('reading a function response', () => {
       [SANDBOX.rideNew, '1456765000001731340', '1456765000001736132'],
       [SANDBOX.rideExisting, '1456765000001736114', '1456765000001737120'],
       [SANDBOX.rideMapped, '1456765000001736154', '1456765000001730167'],
+      [SANDBOX.rideOnLead, '1456765000001809001', '1456765000001808006'],
     ] as const) {
       expect(parseFunctionResponse(200, body)).toMatchObject({ kind: 'accepted', leadId, testRideId });
     }
@@ -58,11 +64,22 @@ describe('reading a function response', () => {
       kind: 'rejected',
       category: 'rule_failure',
       message: 'Duplicate Lead: Lead already exists in the system',
+      leadId: null,
     });
     expect(parseFunctionResponse(200, SANDBOX.mandatory)).toMatchObject({ kind: 'rejected', category: 'rule_failure' });
     expect(parseFunctionResponse(200, SANDBOX.technical)).toMatchObject({ kind: 'rejected', category: 'api_failure' });
     expect(parseFunctionResponse(200, SANDBOX.notAvailable)).toMatchObject({ kind: 'rejected' });
     expect(parseFunctionResponse(200, SANDBOX.withDebugLog)).toMatchObject({ kind: 'rejected', category: 'api_failure' });
+    expect(parseFunctionResponse(200, SANDBOX.pincodeValidation)).toMatchObject({ kind: 'rejected', leadId: null });
+  });
+
+  it('reads the existing lead id off a duplicate answer, exact', () => {
+    expect(parseFunctionResponse(200, SANDBOX.duplicateNamed)).toEqual({
+      kind: 'rejected',
+      category: 'rule_failure',
+      message: 'Duplicate Lead: Active Lead already exists in the system',
+      leadId: '1456765000001809001',
+    });
   });
 
   it('keeps an id exact even if it ever arrives as a bare number', () => {
@@ -104,6 +121,7 @@ const CONFIG: ZohoConfig = {
   refreshToken: 'refresh-me',
   leadFunction: 'leadcreation_for_ampere_website',
   testRideFunction: 'test_ride_creation_for_ampere_website',
+  dealersFunction: 'get_dealers',
   timeoutMs: 1000,
 };
 
