@@ -53,8 +53,8 @@ export function DealerStep({
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
-  // Once the customer has chosen, the list folds to their dealer with a "Great
-  // choice!" line; "Change Dealer" opens it again.
+  // Once the customer has chosen, a "Great choice!" line names their dealer.
+  // Every card stays on screen, so changing their mind is one more tap.
   const [chosen, setChosen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +128,6 @@ export function DealerStep({
 
   const dealers = data?.dealers ?? [];
   const selected = dealers.find((d) => d.code === selectedCode) ?? null;
-  const folded = chosen && selected !== null;
 
   return (
     <div className="flex flex-col gap-7">
@@ -162,15 +161,13 @@ export function DealerStep({
 
       {data && dealers.length > 0 && (
         <div className="flex flex-col gap-3">
-          {!folded && (
-            <p className="inline-flex items-center gap-1.5 text-[13px] text-amp-muted">
-              <PinIcon className="size-4" />
-              Your nearest Ampere experience centres:
-            </p>
-          )}
+          <p className="inline-flex items-center gap-1.5 text-[13px] text-amp-muted">
+            <PinIcon className="size-4" />
+            Your nearest Ampere experience centres:
+          </p>
 
           <div role="group" aria-label="Dealers" className="flex flex-col gap-3">
-            {(folded ? [selected] : dealers).map((dealer) => (
+            {dealers.map((dealer) => (
               <DealerCard
                 key={dealer.code}
                 dealer={dealer}
@@ -184,23 +181,14 @@ export function DealerStep({
             ))}
           </div>
 
-          {folded && (
-            <p className="amp-rise flex flex-wrap items-baseline gap-x-2 text-[14px] text-amp-ink" aria-live="polite">
-              <span>
+          <p className="text-[14px] text-amp-ink" aria-live="polite">
+            {chosen && selected && (
+              <span key={selected.code} className="amp-rise block">
                 Great choice! Your preferred dealership is{' '}
                 <span className="font-semibold">{selected.name}</span>.
               </span>
-              {dealers.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => setChosen(false)}
-                  className="cursor-pointer rounded-md px-0.5 text-[13px] font-semibold text-amp-accent-fill underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-amp-accent"
-                >
-                  Change Dealer
-                </button>
-              )}
-            </p>
-          )}
+            )}
+          </p>
         </div>
       )}
 
