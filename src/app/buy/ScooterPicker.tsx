@@ -309,9 +309,9 @@ function ScooterCard({
 
         {specs && (
           <dl className="grid grid-cols-3 gap-2 border-t border-amp-line/70 px-4 py-3">
-            <Spec icon={<RangeIcon className="size-4" />} label="Range" value={`${specs.rangeKm} km`} />
-            <Spec icon={<SpeedIcon className="size-4" />} label="Top speed" value={`${specs.topSpeedKmph} km/h`} />
-            <Spec icon={<ChargeIcon className="size-4" />} label="Charge" value={`${specs.chargeHours} hrs`} />
+            <Spec icon={<RangeIcon className="size-4" />} label={specs.rangeLabel ?? 'Range'} value={`${specs.rangeKm} km`} />
+            <Spec icon={<SpeedIcon className="size-4" />} label="Top speed" value={`${specs.topSpeedKmph} kmph`} />
+            <Spec icon={<ChargeIcon className="size-4" />} label="Charge time (20–80%)" value={`${specs.chargeHours} hrs`} />
           </dl>
         )}
 

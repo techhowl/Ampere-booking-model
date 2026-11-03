@@ -30,16 +30,18 @@ export interface Colour {
 }
 
 /**
- * The three numbers the reference page leads with. PLACEHOLDER — these need
- * confirming against Ampere's published specifications before launch.
+ * The three numbers each scooter card leads with, as Ampere gave them on
+ * 2026-11-03.
  */
 export interface ModelSpecs {
   /** km on a full charge. */
   rangeKm: number;
+  /** What Ampere call the range for this model, when not plain "Range". */
+  rangeLabel?: string;
   /** km/h. */
   topSpeedKmph: number;
-  /** Hours for a full charge. */
-  chargeHours: number;
+  /** Hours from 20% to 80%, written exactly as Ampere publish it ("3.20"). */
+  chargeHours: string;
 }
 
 /**
@@ -209,7 +211,7 @@ export const MODELS: readonly Model[] = [
     name: 'Nexus EX+',
     sort: 1,
     colours: [CARBON_KNIGHT, STEEL_GREY],
-    specs: { rangeKm: 136, topSpeedKmph: 93, chargeHours: 3.1 },
+    specs: { rangeKm: 136, topSpeedKmph: 93, chargeHours: '2.5' },
     image: 'nexus-ex-plus',
     angles: { 'carbon-knight': 8, 'steel-grey': 8 },
     variant: { group: 'nexus-ex-plus', groupName: 'Nexus EX+', label: 'Standard' },
@@ -224,7 +226,7 @@ export const MODELS: readonly Model[] = [
     name: 'Nexus EX+ Intellipack',
     sort: 2,
     colours: [CARBON_KNIGHT, STEEL_GREY],
-    specs: { rangeKm: 136, topSpeedKmph: 93, chargeHours: 3.1 },
+    specs: { rangeKm: 136, topSpeedKmph: 93, chargeHours: '2.5' },
     // Photographed as the Nexus EX+ — the main site uses the same pictures.
     image: 'nexus-ex-plus',
     angles: { 'carbon-knight': 8, 'steel-grey': 8 },
@@ -240,7 +242,7 @@ export const MODELS: readonly Model[] = [
     name: 'Magnus GMax',
     sort: 3,
     colours: [MATCHA_GREEN, CINNAMON_COPPER],
-    specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: 5.45 },
+    specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: '4.25' },
     image: 'magnus-gmax',
     angles: { 'matcha-green': 4, 'cinnamon-copper': 8 },
     variant: { group: 'magnus-gmax', groupName: 'Magnus GMax', label: 'Standard' },
@@ -256,7 +258,7 @@ export const MODELS: readonly Model[] = [
     name: 'Magnus GMax Intellipack',
     sort: 4,
     colours: [MATCHA_GREEN, MONSOON_BLUE, CINNAMON_COPPER],
-    specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: 5.45 },
+    specs: { rangeKm: 142, topSpeedKmph: 65, chargeHours: '4.25' },
     image: 'magnus-gmax-intellipack',
     angles: { 'matcha-green': 7, 'monsoon-blue': 7, 'cinnamon-copper': 8 },
     variant: { group: 'magnus-gmax', groupName: 'Magnus GMax', label: 'Intellipack' },
@@ -272,7 +274,7 @@ export const MODELS: readonly Model[] = [
     name: 'Magnus Neo',
     sort: 5,
     colours: [OCEAN_BLUE, TURMERIC_LATTE, MISTY_MAUVE],
-    specs: { rangeKm: 125, topSpeedKmph: 60, chargeHours: 5 },
+    specs: { rangeKm: 125, topSpeedKmph: 60, chargeHours: '3.20' },
     image: 'magnus-neo',
     angles: { 'ocean-blue': 5, 'turmeric-latte': 5, 'misty-mauve': 5 },
     variant: { group: 'magnus-neo', groupName: 'Magnus Neo', label: 'Standard' },
@@ -287,7 +289,7 @@ export const MODELS: readonly Model[] = [
     name: 'Reo VYB',
     sort: 6,
     colours: [PASTEL_PURPLE, AQUA_METALLIC, DARK_GREY],
-    specs: { rangeKm: 80, topSpeedKmph: 25, chargeHours: 4 },
+    specs: { rangeKm: 80, rangeLabel: 'Real range', topSpeedKmph: 25, chargeHours: '3' },
     image: 'reo-vyb',
     angles: { 'pastel-purple': 8, 'aqua-metallic': 7, 'dark-grey': 8 },
     variant: { group: 'reo-vyb', groupName: 'Reo VYB', label: 'Standard' },
