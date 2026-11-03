@@ -311,7 +311,15 @@ function ScooterCard({
           <dl className="grid grid-cols-3 gap-2 border-t border-amp-line/70 px-4 py-3">
             <Spec icon={<RangeIcon className="size-4" />} label={specs.rangeLabel ?? 'Range'} value={`${specs.rangeKm} km`} />
             <Spec icon={<SpeedIcon className="size-4" />} label="Top speed" value={`${specs.topSpeedKmph} kmph`} />
-            <Spec icon={<ChargeIcon className="size-4" />} label="Charge time (20–80%)" value={`${specs.chargeHours} hrs`} />
+            <Spec
+              icon={<ChargeIcon className="size-4" />}
+              label={
+                <>
+                  Charge time <span className="whitespace-nowrap">(20–80%)</span>
+                </>
+              }
+              value={`${specs.chargeHours} hrs`}
+            />
           </dl>
         )}
 
@@ -438,7 +446,7 @@ function ColourPicker({
   );
 }
 
-function Spec({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Spec({ icon, label, value }: { icon: React.ReactNode; label: React.ReactNode; value: string }) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-amp-muted">{icon}</span>
