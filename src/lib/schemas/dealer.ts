@@ -4,6 +4,9 @@ import type { NearbyBasis, NearbyDealer } from '@/lib/dealers/nearby';
 /** One definition, used by the dealer step and by POST /api/leads/dealer. */
 
 export const chooseDealerSchema = z.object({
+  /** The scooter on screen, so someone who stops here is called about the right one. */
+  modelCode: z.string().trim().min(1).max(64).nullish(),
+  colourCode: z.string().trim().min(1).max(64).nullish(),
   dealerCode: z.string().trim().min(1, 'Please choose a dealer').max(64),
 });
 

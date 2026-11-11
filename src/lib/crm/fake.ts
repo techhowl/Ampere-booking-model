@@ -5,12 +5,13 @@ import type { CrmClient, CrmRecord, CrmResult } from './types';
  * pattern as FakeJuspayClient.
  *
  * It copies what the sandbox was SEEN to do (2026-11-02, re-tested
- * 2026-11-03), not what the PDF says, where the two differ:
+ * 2026-11-03 and 2026-11-05), not what the PDF says, where the two differ:
  *
  *   - the same mobile within 90 days is a duplicate, whatever its spelling,
  *     and the answer names the existing lead (Existing_lead_id)
  *   - a test ride for a known number attaches to that customer's active lead
- *   - an unknown Zoho_CRM_Lead_ID is refused
+ *   - an unknown Zoho_CRM_Lead_ID is ignored, and the number decides
+ *   - a test ride for a NEW number sent WITH a dealer fails to make its lead
  *   - a date not in dd/MM/yyyy reads as "Mandatory fields are missing"
  *   - the same test ride sent twice is two test rides
  *
@@ -60,6 +61,12 @@ const rejected = (category: string, message: string, leadId: string | null = nul
   leadId,
 });
 const MISSING = rejected('rule_failure', 'Mandatory fields are missing');
+const MAPPED = 'Test Ride created and mapped to the existing Lead successfully';
+/** Seen 2026-11-05, every time, for a new number sent with a dealer. */
+const RIDE_CANNOT_MAKE_LEAD = rejected(
+  'api_failure',
+  'Lead creation failed: {"data":[{"code":"INVALID_DATA","details":{"expected_data_type":"text","api_name":"Preferred_Aggregator_Dealer"},"message":"invalid data","status":"error"}]}',
+);
 
 export class FakeCrmClient implements CrmClient {
   readonly name = 'fake';
@@ -105,26 +112,18 @@ export class FakeCrmClient implements CrmClient {
     this.calls.push({ method: 'test_ride', record });
     const failure = this.failures.test_ride.shift();
     if (failure === 'unreachable') return { kind: 'unreachable', reason: 'network_error', ambiguous: true };
-    if (failure === 'api_failure') return rejected('api_failure', 'Lead creation failed due to technical reasons');
+    if (failure === 'api_failure') return rejected('api_failure', 'Pincode validation failed due to technical reasons');
 
     const startsAt = startOf(record.Test_Ride_Date_Time, record.Time_Slot);
     const mandatory = ['Name', 'Phone', 'Pincode', 'Vehicle_Model_Interested', 'Test_Ride_Location', 'Website_Lead_ID'];
     if (mandatory.some((field) => !record[field]) || startsAt === null) return MISSING;
 
-    let lead: FakeLead | undefined;
-    let message: string;
-    if (record.Zoho_CRM_Lead_ID) {
-      lead = this.leads.get(record.Zoho_CRM_Lead_ID);
-      if (!lead) return rejected('rule_failure', 'Provided Zoho CRM Lead ID is not available');
-      message = 'Test Ride created and mapped to the existing Lead successfully';
-    } else {
-      lead = this.activeLeadFor(record.Phone ?? '');
-      if (lead) {
-        message = 'Duplicate Lead already exists. Test Ride created and mapped to the existing active Lead successfully';
-      } else {
-        lead = this.addLead(record.Phone ?? '');
-        message = 'New Lead and Test Ride created successfully';
-      }
+    let message = MAPPED;
+    let lead = this.leads.get(record.Zoho_CRM_Lead_ID ?? '') ?? this.activeLeadFor(record.Phone ?? '');
+    if (!lead) {
+      if (record.Dealer_ID) return RIDE_CANNOT_MAKE_LEAD;
+      lead = this.addLead(record.Phone ?? '');
+      message = 'New Lead and Test Ride created successfully';
     }
 
     const ride: FakeRide = { id: this.id(), leadId: lead.id, startsAt, record };

@@ -24,6 +24,9 @@ interface Props {
   onLoaded: (data: NearbyDealersResponse) => void;
   /** Already chosen, or carried in from the dealer locator. */
   preferredCode: string | null;
+  /** The scooter chosen on the step before, saved along with the dealer. */
+  modelCode: string | null;
+  colourCode: string | null;
   onConfirmed: (dealer: NearbyDealer) => void;
   /** The session timed out; the journey asks for the OTP again. */
   onExpired: () => void;
@@ -42,6 +45,8 @@ export function DealerStep({
   cached,
   onLoaded,
   preferredCode,
+  modelCode,
+  colourCode,
   onConfirmed,
   onExpired,
   onBack,
@@ -59,7 +64,7 @@ export function DealerStep({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // One key per dealer: retrying the same choice replays, a new choice is new.
+  // One key per choice: retrying the same one replays, a new one is new.
   const keys = useRef(new Map<string, string>());
 
   useEffect(() => {
@@ -98,10 +103,11 @@ export function DealerStep({
     const dealer = data?.dealers.find((d) => d.code === selectedCode);
     if (!dealer) return;
 
-    let key = keys.current.get(dealer.code);
+    const choice = `${dealer.code}|${modelCode}|${colourCode}`;
+    let key = keys.current.get(choice);
     if (!key) {
       key = crypto.randomUUID();
-      keys.current.set(dealer.code, key);
+      keys.current.set(choice, key);
     }
 
     setSaving(true);
@@ -110,7 +116,7 @@ export function DealerStep({
       const res = await fetch('/api/leads/dealer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-        body: JSON.stringify({ dealerCode: dealer.code }),
+        body: JSON.stringify({ dealerCode: dealer.code, modelCode, colourCode }),
       });
       if (res.ok) {
         onConfirmed(dealer);

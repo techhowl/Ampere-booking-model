@@ -14,9 +14,9 @@ the sandbox disagree, the code follows the sandbox.
 ## How it works
 
 ```
-OTP verified ──► crm_jobs row (lead) ──┐
-                                       ├──► after() sends it once the response is gone
-Test ride booked ─► crm_jobs row (ride)┘     │
+OTP verified ───► crm_jobs row (lead), held 30 minutes for the booking ─► sent then if no booking came
+Test ride booked ► crm_jobs row (ride) ─► after() sends Create Lead, then the ride on that lead
+                                             │
                                              ├─ accepted ─► ids saved on leads / test_ride_bookings
                                              ├─ CRM said no / unreachable ─► retry: 1, 5, 15, 30 min … ≈3 days
                                              └─ still failing ─► "dead" — pnpm crm status / requeue
@@ -34,6 +34,23 @@ Test ride booked ─► crm_jobs row (ride)┘     │
 **Unverified numbers are never sent.** The CRM has no "verified" flag, so a
 dealer would ring numbers that may be typos or someone else's. They stay in
 our own lead list (spec 5) and in the export.
+
+**The lead goes with the booking, not at the OTP.** The customer chooses their
+dealer, scooter, colour and help topics after the OTP, and the CRM takes those
+only from Create Lead. A test ride on an existing lead keeps its dealer on the
+ride and leaves the lead as it was (seen 5 Nov: dealer, colour, topics and a
+changed pincode all stayed as first sent). So the ride job sends Create Lead
+first, with all of them, then the ride with the lead's id. That also keeps us
+off the path where a ride makes the lead, which fails for a new number sent
+with a dealer. Someone who stops before booking goes after `LEAD_HOLD_MS` (30
+minutes), with whatever they had chosen: the dealer step saves the dealer and
+the scooter on the lead for this.
+
+**Only a customer the CRM already has keeps their old dealer on the lead.** A
+returning customer, or one who stopped for more than 30 minutes and came back,
+already has a lead, and Create Lead answers "Duplicate". The new choice is on
+the test ride, correctly, but we have no way to change the lead. Only Greaves
+can: their test ride function would have to update the lead.
 
 ## The API, as observed
 
@@ -68,8 +85,10 @@ raw response text. The sandbox accepts string ids.
 | Test ride, existing `Zoho_CRM_Lead_ID` | `Test Ride created and mapped to the existing Lead` (3 Nov wording; was `Existing Lead updated and Test Ride created`) |
 | Test ride, known mobile, no lead id | `Duplicate Lead already exists. Test Ride created and mapped to the existing active Lead` |
 | Test ride, new mobile, no dealer, served pincode | `New Lead and Test Ride created`; the CRM picks the dealer |
-| **Test ride, new mobile, WITH a dealer** | **`api_failure: Lead creation failed due to technical reasons`, every time (3 Nov).** Worked on 2 Nov. Our normal order (lead first, ride with its id) avoids this path. |
-| **Customer pincode the CRM does not serve** (e.g. 560038), with or without a dealer | **Refused.** Create Lead: `api_failure: …technical reasons` (no dealer) or `rule_failure: Invalid Pincode` (with one). Test ride: `api_failure: Pincode validation failed…`. The CRM checks the customer's pincode against its own `Dealer_Service_Locations` (a 15 km search), not the dealer we send. Raised with Greaves. |
+| **Test ride, new mobile, WITH a dealer** | **`api_failure: Lead creation failed`, every time (3 and 5 Nov).** On 5 Nov the answer names `Preferred_Aggregator_Dealer`, `INVALID_DATA`. Worked on 2 Nov. We always send the lead first, so we never take this path. |
+| Test ride with a lead id the CRM does not have | Since 5 Nov the id is ignored and the mobile decides: known number maps to its lead, new number makes one, or fails as above if a dealer was sent. We read that failure as "lead gone", make the lead again and resend. Before 5 Nov: `Provided Zoho CRM Lead ID is not available`. |
+| Customer pincode not in the CRM's master | **Accepted since 5 Nov** (refused until then). Greaves' fallback adds any 6-digit number to `Postal_Codes`, with an empty city, so we refuse `9xxxxx` on the form. Greaves say production does the same. |
+| No dealer sent, pincode with no dealer mapped | Lead created with `Preferred_Aggregator_Dealer` empty, and `remarks: No active dealer found…` (5 Nov) |
 | Unknown `Zoho_CRM_Lead_ID` | `rule_failure: Provided Zoho CRM Lead ID is not available` → we drop the id and resend |
 | **Same test ride sent twice** | **Two test rides.** No idempotency. See "Retries" below. |
 | Time slot `01:00 PM - 03:00 PM`, `1:00 PM - 3:00 PM`, `1:00 PM – 3:00 PM` | All stored 13:00 IST. `Time_Slot` is stored verbatim, so the page itself uses Greaves' `hh:mm AM - hh:mm PM`. |
@@ -79,8 +98,10 @@ raw response text. The sandbox accepts string ids.
 | No dealer, pincode with no active dealer | 2 Nov: crashed at line 446. 3 Nov: no crash, but refused as above, and `userMessage` still carries the debug log. |
 | No dealer, served pincode | CRM assigns the dealer itself (debug log still in `userMessage`) |
 | The PDF's sample ids (`1441684…`) | Not valid in this sandbox (ids there start `1456765…`) |
-| Dealer sent on a test ride | **Not visible on the Test Ride**: `Branch` is empty on every ride, 2 and 3 Nov, even minutes later and even when the CRM picked the dealer. Greaves say the showroom is set at creation; if it is another field, our API user cannot see it. Leads keep the dealer; Greaves assign the lead to it once they qualify it. |
-| `Is_There_Anything_We_Can_Help_You_With?` | A picklist; Greaves added `Brochure` (3 Nov). It is on the Lead, which our token cannot read, so we cannot check it ourselves. |
+| Dealer sent on a test ride | **Stored in `Dealer_Name` since 5 Nov**; correct in every test. `Branch` stays empty. The ride has no field for colour or help topics. |
+| Dealer sent on Create Lead | Stored as `Preferred_Aggregator_Dealer` (a bare id). An unknown id falls back to the CRM's default for the pincode. Greaves assign the lead once they qualify it; until then its `Dealer` field is empty. |
+| `Is_There_Anything_We_Can_Help_You_With?` | A picklist. `Brochure` saves correctly on Create Lead (read back 5 Nov). A direct read of Leads is refused (`OAUTH_SCOPE_MISMATCH`), but COQL can read them. |
+| Date on a test ride | Sent as `Test_Ride_Date_Time`. Stored in **`Scheduled_Date_Time`** since 5 Nov; the old field is empty on new rides and still holds the date on older ones. |
 | Latency | 0.4–4 s typically, one call took 16 s. Hence background sending. |
 
 ## Field mapping
@@ -139,9 +160,10 @@ at 736101). Both show as they are; raised with Greaves.
 The CRM has no idempotency, so a retry after a timeout could create a second
 test ride. Before a test ride is sent, its job is marked *in flight*. If that
 send times out, or the worker dies mid-send, the next attempt first looks the
-ride up (COQL on `Test_Rides` by lead and start time) and adopts it if it is
-there. If the look-up itself fails, the ride is sent anyway. A duplicate is a
-nuisance for the dealer; a lost ride is a customer turned away.
+ride up (COQL on `Test_Rides` by lead and start time, in either date field, and
+in only one if the org has only one) and adopts it if it is there. If the
+look-up itself fails, the ride is sent anyway. A duplicate is a nuisance for the
+dealer; a lost ride is a customer turned away.
 
 Leads need no look-up. The CRM refuses a second lead for the same mobile.
 
@@ -149,7 +171,7 @@ The look-up needs our copy of the CRM lead id. Since 3 Nov a "Duplicate
 Lead" answer names the existing lead (`Existing_lead_id`), and we keep it, so
 a returning customer's rides are sent to that lead by id and can be looked up.
 If a duplicate answer ever names no lead, a ride that times out for that
-customer is sent again unchecked. Our token cannot read Leads.
+customer is sent again unchecked.
 
 ## Rules the queue keeps
 
@@ -202,6 +224,7 @@ warning on every boot.
 
 Every record we created has the name **"TEST Ampere Website (ignore)"**, a
 mobile in the **+91 90000 xxxxx** range, and `utm_campaign` of
-`sandbox_integration_test`, `crm_e2e`, `sandbox_retest_3nov` or `crm_e2e_3nov`.
-Greaves can delete them by any of those. (Greaves deleted the 2 Nov records on
-3 Nov.)
+`sandbox_integration_test`, `crm_e2e`, `sandbox_retest_3nov`, `crm_e2e_3nov`,
+`sandbox_retest_5nov` or `crm_e2e_5nov`. Greaves can delete them by any of those.
+(Greaves deleted the 2 Nov records on 3 Nov.) The 5 Nov tests also left `999999`
+in the sandbox's `Postal_Codes`, from the check that the fallback adds anything.

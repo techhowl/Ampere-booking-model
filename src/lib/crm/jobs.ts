@@ -20,6 +20,13 @@ import type { CrmClient, CrmResult } from './types';
  * booking. Retries back off for about three days; then the job is "dead" and
  * waits for a person (`pnpm crm status`, `pnpm crm requeue`).
  *
+ * The lead goes with the booking. The customer chooses their dealer, scooter,
+ * colour and help topics after the OTP, and the CRM reads them only from Create
+ * Lead: a test ride on an existing lead keeps its dealer on the ride and leaves
+ * the lead as it was (seen 2026-11-05). So a ride job sends Create Lead first,
+ * with all of them, then the ride with the lead's id. A customer who stops
+ * before booking goes after LEAD_HOLD_MS, with what they had chosen by then.
+ *
  * What makes this safe to run from several places at once — after() in the
  * request, the cron, a second instance:
  *
@@ -38,7 +45,14 @@ export const MAX_ATTEMPTS = 12;
 /** Minutes to wait after the nth failed attempt. About three days in all. */
 const BACKOFF_MINUTES = [1, 5, 15, 30, 60, 120, 240, 480, 720, 1440, 1440];
 
-/** Longer than one attempt can take: a token, a lookup and two sends at 30 s. */
+/**
+ * How long a verified lead waits for its booking. Comfortably longer than the
+ * journey takes, and short enough that someone who stopped can still be called
+ * while they remember why.
+ */
+export const LEAD_HOLD_MS = 30 * 60_000;
+
+/** Longer than one attempt can take: a token, a lookup and four sends at 30 s. */
 const CLAIM_MS = 10 * 60_000;
 
 /**
@@ -75,7 +89,12 @@ export function retryDelayMs(attempts: number): number {
  * their number and verifies again is a different person to the CRM, whose
  * duplicate check is on the mobile number.
  */
-export async function enqueueLeadSync(prisma: PrismaClient, leadId: string): Promise<string | null> {
+export async function enqueueLeadSync(
+  prisma: PrismaClient,
+  leadId: string,
+  options: { holdMs?: number } = {},
+): Promise<string | null> {
+  const nextAttemptAt = new Date(Date.now() + (options.holdMs ?? 0));
   const lead = await prisma.lead.findUnique({
     where: { id: leadId },
     select: { phoneVerified: true, phoneHash: true },
@@ -87,7 +106,7 @@ export async function enqueueLeadSync(prisma: PrismaClient, leadId: string): Pro
   const dedupeKey = `lead:${leadId}:${lead.phoneHash}`;
   const job = await prisma.crmJob.upsert({
     where: { dedupeKey },
-    create: { kind: 'lead', dedupeKey, leadId, phoneHash: lead.phoneHash },
+    create: { kind: 'lead', dedupeKey, leadId, phoneHash: lead.phoneHash, nextAttemptAt },
     update: {},
     select: { id: true },
   });
@@ -95,7 +114,7 @@ export async function enqueueLeadSync(prisma: PrismaClient, leadId: string): Pro
   // is verified again: A, then B, then A again.
   await prisma.crmJob.updateMany({
     where: { id: job.id, status: 'done', outcome: { in: ['superseded', 'not_verified'] } },
-    data: { status: 'pending', attempts: 0, nextAttemptAt: new Date(), outcome: null, completedAt: null },
+    data: { status: 'pending', attempts: 0, nextAttemptAt, outcome: null, completedAt: null },
   });
   return job.id;
 }
@@ -386,7 +405,7 @@ async function finish(context: Context, step: Step, now: Date): Promise<RunResul
 /* ------------------------------------------------------------------ */
 
 async function processLead(context: Context): Promise<Step> {
-  const { prisma, client, job } = context;
+  const { prisma, job } = context;
   const lead = await prisma.lead.findUnique({ where: { id: job.leadId }, include: { dealer: true } });
   if (!lead) return dead('the lead no longer exists');
 
@@ -399,47 +418,56 @@ async function processLead(context: Context): Promise<Step> {
   // id is cleared whenever the number changes, so it is this number's.
   if (lead.crmLeadId) return done('already_linked', { crmLeadId: lead.crmLeadId });
 
+  // A booking the ride job has not sent yet: its choices are the latest.
+  const ride = await prisma.testRide.findFirst({
+    where: { leadId: lead.id, status: 'booked' },
+    orderBy: { createdAt: 'desc' },
+    include: { dealer: true },
+  });
+  const snapshot = await snapshotOf(prisma, lead, ride ? choicesOf(ride) : {});
+
+  const sent = await sendLead(context, lead, snapshot, false);
+  return sent.ok ? done(sent.outcome, { crmLeadId: sent.crmLeadId }) : sent.step;
+}
+
+type LeadSent =
+  | { ok: true; outcome: 'created' | 'duplicate'; crmLeadId: string | null }
+  | { ok: false; step: Step };
+
+/**
+ * Create Lead, keeping the id the CRM answers with.
+ *
+ * Safe to repeat: the CRM refuses a second lead for the same number and names
+ * the first. `ambiguous` is only ever carried through for a test ride whose
+ * earlier send is in doubt; a lead's own retry is never ambiguous.
+ */
+async function sendLead(
+  context: Context,
+  lead: Lead,
+  snapshot: LeadSnapshot,
+  ambiguous: boolean,
+): Promise<LeadSent> {
   const timeout = sendTimeout(context);
-  if (timeout === 'out') return outOfTime(false);
+  if (timeout === 'out') return { ok: false, step: outOfTime(ambiguous) };
 
-  const snapshot = await snapshotOf(prisma, lead);
-  const result = await client.createLead(buildLeadRecord(snapshot), timeout);
+  const result = await context.client.createLead(buildLeadRecord(snapshot), timeout);
+  const verdict = verdictOf(result);
 
-  switch (verdictOf(result)) {
-    case 'accepted': {
-      const { leadId } = result as Extract<CrmResult, { kind: 'accepted' }>;
-      if (leadId) {
-        // Only if still empty — a test ride may have linked the active lead
-        // meanwhile, and that one is authoritative — and only if the number
-        // is still the one this lead was made for.
-        await prisma.lead.updateMany({
-          where: { id: lead.id, crmLeadId: null, phoneHash: lead.phoneHash },
-          data: { crmLeadId: leadId },
-        });
-      }
-      return done('created', { crmLeadId: leadId });
+  if (verdict === 'accepted' || verdict === 'duplicate') {
+    const crmLeadId = (result as Exclude<CrmResult, { kind: 'unreachable' }>).leadId;
+    if (crmLeadId) {
+      // Only if still empty — a test ride may have linked the active lead
+      // meanwhile, and that one is authoritative — and only if the number is
+      // still the one this lead was made for.
+      await context.prisma.lead.updateMany({
+        where: { id: lead.id, crmLeadId: null, phoneHash: lead.phoneHash },
+        data: { crmLeadId },
+      });
     }
-    case 'duplicate': {
-      // The CRM already has an active lead for this mobile. Nothing lost. The
-      // answer names that lead, so keep it: this customer's test rides then go
-      // to it by id, and a ride that times out can be looked up before it is
-      // sent again. Same fences as a created lead.
-      const existing = (result as Extract<CrmResult, { kind: 'rejected' }>).leadId;
-      if (existing) {
-        await prisma.lead.updateMany({
-          where: { id: lead.id, crmLeadId: null, phoneHash: lead.phoneHash },
-          data: { crmLeadId: existing },
-        });
-      }
-      return done('duplicate', { crmLeadId: existing });
-    }
-    case 'missing_fields':
-      return dead(errorOf(result));
-    default:
-      // Leads cannot be duplicated by a retry — the CRM refuses a second one
-      // for the same number — so a lead retry is never ambiguous.
-      return failed(result, false);
+    return { ok: true, outcome: verdict === 'accepted' ? 'created' : 'duplicate', crmLeadId };
   }
+  if (verdict === 'missing_fields') return { ok: false, step: dead(errorOf(result)) };
+  return { ok: false, step: failed(result, ambiguous) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -469,28 +497,33 @@ async function processTestRide(context: Context): Promise<Step> {
   }
   const startsAt = crmSlotStart(ride.slotDate, ride.slotWindow);
 
+  const snapshot = await snapshotOf(prisma, lead, choicesOf(ride));
+  if (!snapshot.vehicleCrmId) {
+    return retry(`no CRM vehicle id for ${ride.modelCode}; run: pnpm crm sync-models`, !previousSettled);
+  }
+
+  // The lead first, carrying everything the customer chose: the CRM reads those
+  // only from Create Lead. It also keeps us off the ride-makes-the-lead path,
+  // which fails for a new number sent with a dealer (seen 2026-11-05).
+  let crmLeadId = lead.crmLeadId;
+  if (!crmLeadId) {
+    const sent = await sendLead(context, lead, snapshot, !previousSettled);
+    if (!sent.ok) return sent.step;
+    crmLeadId = sent.crmLeadId;
+  }
+
   // The last send may have landed. The CRM would make a second ride from a
   // second send, so look first. Only possible once we know the CRM lead.
-  if (job.ambiguous && lead.crmLeadId) {
+  if (job.ambiguous && crmLeadId) {
     const timeout = sendTimeout(context);
     if (timeout === 'out') return outOfTime(true);
-    const found = await client.findTestRides(lead.crmLeadId, startsAt, timeout);
+    const found = await client.findTestRides(crmLeadId, startsAt, timeout);
     const landed = found?.[0];
-    if (landed) return linkRide(prisma, ride, lead.phoneHash, lead.crmLeadId, landed, 'recovered');
+    if (landed) return linkRide(prisma, ride, lead.phoneHash, crmLeadId, landed, 'recovered');
     // An empty answer settles it. A failed lookup does not — but the ride is
     // sent anyway: a duplicate is a nuisance for the dealer, a lost ride is a
     // customer turned away at the showroom.
     previousSettled = found !== null;
-  }
-
-  const snapshot = await snapshotOf(prisma, lead, {
-    modelCode: ride.modelCode,
-    colourCode: ride.colourCode,
-    dealer: ride.dealer,
-    helpTopics: topicsOf(ride),
-  });
-  if (!snapshot.vehicleCrmId) {
-    return retry(`no CRM vehicle id for ${ride.modelCode}; run: pnpm crm sync-models`, !previousSettled);
   }
 
   const record: TestRideSnapshot = {
@@ -498,7 +531,7 @@ async function processTestRide(context: Context): Promise<Step> {
     mode: ride.mode === 'home' ? 'home' : 'dealer',
     slotDate: ride.slotDate,
     windowCode: ride.slotWindow,
-    crmLeadId: lead.crmLeadId,
+    crmLeadId,
   };
 
   const timeout = sendTimeout(context);
@@ -514,16 +547,18 @@ async function processTestRide(context: Context): Promise<Step> {
 
   let result = await client.createTestRide(buildTestRideRecord(record), timeout);
 
-  // The CRM no longer knows the lead we linked — merged, or deleted. Forget
-  // it and let the CRM match the customer by number instead.
-  if (verdictOf(result) === 'stale_lead_id' && record.crmLeadId) {
+  // The CRM no longer knows the lead we linked — merged, or deleted. Forget it,
+  // make the lead again, and send the ride to that one.
+  if (record.crmLeadId && leadIdNotKnown(result)) {
     await prisma.lead.updateMany({
       where: { id: lead.id, crmLeadId: record.crmLeadId },
       data: { crmLeadId: null },
     });
+    const sent = await sendLead(context, lead, snapshot, true);
+    if (!sent.ok) return sent.step;
     const again = sendTimeout(context);
     if (again === 'out') return outOfTime(true);
-    result = await client.createTestRide(buildTestRideRecord({ ...record, crmLeadId: null }), again);
+    result = await client.createTestRide(buildTestRideRecord({ ...record, crmLeadId: sent.crmLeadId }), again);
   }
 
   switch (verdictOf(result)) {
@@ -575,6 +610,16 @@ function rideOutcome(message: string): string {
 function topicsOf(ride: TestRide): string[] {
   if (ride.helpTopics.length > 0) return ride.helpTopics;
   return ride.helpTopic ? [ride.helpTopic] : [];
+}
+
+/** What the customer chose on this booking, over what the lead held before it. */
+function choicesOf(ride: TestRide & { dealer: Dealer | null }) {
+  return {
+    modelCode: ride.modelCode,
+    colourCode: ride.colourCode,
+    dealer: ride.dealer,
+    helpTopics: topicsOf(ride),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -641,6 +686,17 @@ export function verdictOf(result: CrmResult): Verdict {
 }
 
 /**
+ * A ride sent with a lead id, and the CRM does not know the id. It said so
+ * until 2026-11-03. Since 2026-11-05 it ignores the id and goes by the number,
+ * so for a number it has no lead for, it tries to make one and fails. A ride
+ * on a lead it does know never tries to make a lead.
+ */
+function leadIdNotKnown(result: CrmResult): boolean {
+  if (verdictOf(result) === 'stale_lead_id') return true;
+  return result.kind === 'rejected' && result.message.toLowerCase().startsWith('lead creation failed');
+}
+
+/**
  * Long runs of digits are blanked before anything is stored or logged. The
  * CRM's text comes from Greaves' code, which has already leaked its debug log
  * once; a mobile number must not ride along into last_error.
@@ -701,7 +757,7 @@ export async function reconcileMissingJobs(
       )
     LIMIT 200`;
 
-  for (const { id } of leads) await enqueueLeadSync(prisma, id);
+  for (const { id } of leads) await enqueueLeadSync(prisma, id, { holdMs: LEAD_HOLD_MS });
   for (const { id } of rides) await enqueueTestRideSync(prisma, id);
   return { leads: leads.length, testRides: rides.length };
 }

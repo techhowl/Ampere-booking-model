@@ -50,16 +50,30 @@ describe('FakeCrmClient', () => {
     const second = await crm.createTestRide(ride('+919000012345'));
     expect(second).toMatchObject({
       kind: 'accepted',
-      message: expect.stringMatching(/^Duplicate Lead already exists/),
+      message: 'Test Ride created and mapped to the existing Lead successfully',
       leadId: first.kind === 'accepted' ? first.leadId : 'x',
     });
   });
 
-  it('refuses a lead id it does not have', async () => {
+  it('ignores a lead id it does not have, and goes by the number', async () => {
     const crm = new FakeCrmClient();
     expect(await crm.createTestRide(ride('+919000012345', { Zoho_CRM_Lead_ID: '123' }))).toMatchObject({
-      message: 'Provided Zoho CRM Lead ID is not available',
+      kind: 'accepted',
+      message: 'New Lead and Test Ride created successfully',
     });
+  });
+
+  it('fails a ride for a new number sent with a dealer, but not for a known one', async () => {
+    const crm = new FakeCrmClient();
+    const withDealer = { Dealer_ID: '1456765000001717131' };
+    expect(await crm.createTestRide(ride('+919000012345', withDealer))).toMatchObject({
+      kind: 'rejected',
+      message: expect.stringMatching(/^Lead creation failed: .*Preferred_Aggregator_Dealer/),
+    });
+    expect(crm.leadCount).toBe(0);
+
+    await crm.createLead(lead('+919000012345'));
+    expect(await crm.createTestRide(ride('+919000012345', withDealer))).toMatchObject({ kind: 'accepted' });
   });
 
   it('reads a date in the wrong format as a missing field, as the sandbox does', async () => {

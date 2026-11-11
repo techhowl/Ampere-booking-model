@@ -1,7 +1,7 @@
 import { after } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getCrmClient } from './client';
-import { enqueueLeadSync, enqueueTestRideSync, runDueJobs, runJob } from './jobs';
+import { enqueueLeadSync, enqueueTestRideSync, LEAD_HOLD_MS, runDueJobs, runJob } from './jobs';
 
 /**
  * The request-side half of the CRM sync: queue a job, then send it once the
@@ -41,9 +41,14 @@ function sendAfterResponse(jobId: string | null): void {
   });
 }
 
+/**
+ * Not sent now: it waits for the booking, which sends it with everything the
+ * customer chose. See LEAD_HOLD_MS. The run after this response still carries
+ * any jobs that have come due.
+ */
 export async function queueLeadSync(leadId: string): Promise<void> {
   try {
-    sendAfterResponse(await enqueueLeadSync(prisma, leadId));
+    sendAfterResponse(await enqueueLeadSync(prisma, leadId, { holdMs: LEAD_HOLD_MS }));
   } catch (error) {
     console.error('[crm] could not queue a lead; reconcile will', { error: describe(error) });
   }

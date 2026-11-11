@@ -14,6 +14,7 @@ const prisma = new PrismaClient({ datasources: { db: { url: inject('databaseUrl'
 const {
   enqueueLeadSync,
   enqueueTestRideSync,
+  LEAD_HOLD_MS,
   MAX_ATTEMPTS,
   reconcileMissingJobs,
   requeueDeadJobs,
@@ -182,6 +183,64 @@ describe('queueing', () => {
 });
 
 /* ------------------------------------------------------------------ */
+
+describe('the wait for a booking', () => {
+  const afterWait = () => new Date(Date.now() + LEAD_HOLD_MS + 1000);
+
+  it('holds a verified lead back until the wait is over', async () => {
+    const jobId = (await enqueueLeadSync(prisma, await makeLead(), { holdMs: LEAD_HOLD_MS }))!;
+
+    expect(await run(jobId)).toMatchObject({ state: 'skipped' });
+    expect(await runDueJobs(prisma, crm)).toEqual([]);
+    expect(crm.calls).toEqual([]);
+
+    expect(await run(jobId, crm, afterWait())).toMatchObject({ state: 'done', outcome: 'created' });
+  });
+
+  it('sends someone who stopped at the dealer step with the dealer they picked', async () => {
+    await prisma.dealer.create({ data: { dealerCode: 'GEM-LAGGERE', name: 'Active Motors-Laggere', active: true, crmId: '1456765000001717373' } });
+    const leadId = await makeLead();
+    const jobId = (await enqueueLeadSync(prisma, leadId, { holdMs: LEAD_HOLD_MS }))!;
+    await prisma.lead.update({ where: { id: leadId }, data: { dealerCode: 'GEM-LAGGERE' } });
+
+    await run(jobId, crm, afterWait());
+
+    expect(sent('lead')[0]).toMatchObject({ Dealer_ID: '1456765000001717373', Dealer_Name: 'Active Motors-Laggere' });
+  });
+
+  it('sends the lead once when the customer books inside the wait', async () => {
+    const leadId = await makeLead();
+    const leadJob = (await enqueueLeadSync(prisma, leadId, { holdMs: LEAD_HOLD_MS }))!;
+
+    await run((await enqueueTestRideSync(prisma, await makeRide(leadId)))!);
+    expect(await run(leadJob, crm, afterWait())).toMatchObject({ state: 'done', outcome: 'already_linked' });
+
+    expect(sent('lead')).toHaveLength(1);
+    expect(crm.leadCount).toBe(1);
+  });
+
+  it('uses the booking’s choices if the wait ends while its ride job has not run', async () => {
+    const leadId = await makeLead();
+    const leadJob = (await enqueueLeadSync(prisma, leadId, { holdMs: LEAD_HOLD_MS }))!;
+    await makeRide(leadId, { helpTopics: ['brochure'], helpTopic: 'brochure' });
+
+    await run(leadJob, crm, afterWait());
+
+    expect(sent('lead')[0]!['Is_There_Anything_We_Can_Help_You_With?']).toBe('Brochure');
+  });
+
+  it('holds a number the customer has gone back to as well', async () => {
+    const leadId = await makeLead();
+    const jobA = (await enqueueLeadSync(prisma, leadId, { holdMs: LEAD_HOLD_MS }))!;
+    await changeNumber(leadId, '+919123456780');
+    await run(jobA, crm, afterWait());
+    await changeNumber(leadId, PHONE);
+    await verify(leadId);
+
+    expect(await enqueueLeadSync(prisma, leadId, { holdMs: LEAD_HOLD_MS })).toBe(jobA);
+    expect(await run(jobA)).toMatchObject({ state: 'skipped' });
+  });
+});
 
 describe('a lead', () => {
   it('reaches the CRM with every field, and keeps the CRM’s id', async () => {
@@ -389,13 +448,72 @@ describe('a test ride', () => {
     expect(crm.ridesOn(crmLeadId!)).toHaveLength(1);
   });
 
-  it('lets the CRM make the lead when the lead job has not run', async () => {
+  it('sends the lead first, with everything chosen on the booking, then the ride on that lead', async () => {
+    await prisma.dealer.create({ data: { dealerCode: 'GEM-LAGGERE', name: 'Active Motors-Laggere', active: true, crmId: '1456765000001717373' } });
+    await prisma.crmVehicleModel.create({ data: { modelCode: 'magnus-gmax', crmId: '1456765000001702030', crmName: 'Magnus GMAX' } });
     const leadId = await makeLead();
-    const rideId = await makeRide(leadId);
+    const rideId = await makeRide(leadId, { dealerCode: 'GEM-LAGGERE', modelCode: 'magnus-gmax', colourCode: 'matcha-green' });
 
-    expect(await run((await enqueueTestRideSync(prisma, rideId))!)).toMatchObject({ state: 'done', outcome: 'created' });
-    expect(sent('test_ride')[0]!.Zoho_CRM_Lead_ID).toBe('');
-    expect((await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId).toMatch(/^\d{19}$/);
+    expect(await run((await enqueueTestRideSync(prisma, rideId))!)).toMatchObject({ state: 'done', outcome: 'linked' });
+
+    expect(crm.calls.map((c) => c.method)).toEqual(['lead', 'test_ride']);
+    expect(sent('lead')[0]).toMatchObject({
+      Dealer_ID: '1456765000001717373',
+      Dealer_Name: 'Active Motors-Laggere',
+      Vehicle_Model_Interested: '1456765000001702030',
+      Colour_Preference: 'Matcha Green',
+      'Is_There_Anything_We_Can_Help_You_With?': 'Offers,Brochure',
+    });
+    const { crmLeadId } = await prisma.lead.findUniqueOrThrow({ where: { id: leadId } });
+    expect(crmLeadId).toMatch(/^\d{19}$/);
+    expect(sent('test_ride')[0]).toMatchObject({ Zoho_CRM_Lead_ID: crmLeadId, Dealer_ID: '1456765000001717373' });
+  });
+
+  it('sends the lead with the customer’s pincode as it is at booking, not as it was at the OTP', async () => {
+    const leadId = await makeLead();
+    const heldJob = (await enqueueLeadSync(prisma, leadId, { holdMs: LEAD_HOLD_MS }))!;
+    await prisma.lead.update({ where: { id: leadId }, data: { pincode: '560038' } });
+
+    await run((await enqueueTestRideSync(prisma, await makeRide(leadId)))!);
+
+    expect(sent('lead')).toHaveLength(1);
+    expect(sent('lead')[0]!.Pincode).toBe('560038');
+    expect((await job(heldJob)).status).toBe('pending');
+  });
+
+  it('stops before the ride if the lead cannot be made, and tries both again', async () => {
+    const leadId = await makeLead();
+    const jobId = (await enqueueTestRideSync(prisma, await makeRide(leadId)))!;
+    crm.failNext('lead', 'api_failure');
+    const at = soon();
+
+    expect(await run(jobId, crm, at)).toMatchObject({ state: 'retry' });
+    expect(crm.calls.map((c) => c.method)).toEqual(['lead']);
+    // Nothing went out for the ride, so there is nothing to look up later.
+    expect((await job(jobId)).ambiguous).toBe(false);
+
+    expect(await run(jobId, crm, new Date(at.getTime() + 61_000))).toMatchObject({ state: 'done', outcome: 'linked' });
+    expect(crm.calls.map((c) => c.method)).toEqual(['lead', 'lead', 'test_ride']);
+  });
+
+  it('survives a lead that landed but whose answer was lost: the CRM names it next time', async () => {
+    const leadId = await makeLead();
+    const jobId = (await enqueueTestRideSync(prisma, await makeRide(leadId)))!;
+    crm.failNext('lead', 'timeout_after_commit');
+    const at = soon();
+
+    await run(jobId, crm, at);
+    expect(await run(jobId, crm, new Date(at.getTime() + 61_000))).toMatchObject({ state: 'done', outcome: 'linked' });
+
+    expect(crm.leadCount).toBe(1);
+    expect(crm.rideCount).toBe(1);
+    expect(sent('test_ride')[0]!.Zoho_CRM_Lead_ID).toMatch(/^\d{19}$/);
+  });
+
+  it('gives up at once if the lead is missing what the CRM requires', async () => {
+    const answers = stub(async () => ({ kind: 'rejected', category: 'rule_failure', message: 'Mandatory fields are missing: Pincode', leadId: null }));
+    const jobId = (await enqueueTestRideSync(prisma, await makeRide(await makeLead())))!;
+    expect(await run(jobId, answers)).toMatchObject({ state: 'dead' });
   });
 
   it('after a duplicate lead, sends the ride to the existing CRM lead by its id', async () => {
@@ -417,13 +535,13 @@ describe('a test ride', () => {
     await run((await enqueueLeadSync(prisma, leadId))!, before);
     const rideId = await makeRide(leadId);
 
-    expect(await run((await enqueueTestRideSync(prisma, rideId))!, before)).toMatchObject({ outcome: 'mapped_to_existing_lead' });
+    expect(await run((await enqueueTestRideSync(prisma, rideId))!, before)).toMatchObject({ outcome: 'linked' });
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId).toBe(
       existing.kind === 'accepted' ? existing.leadId : 'x',
     );
   });
 
-  it('when the CRM no longer knows our lead id, forgets it and sends again', async () => {
+  it('when the CRM no longer knows our lead id, makes the lead again and sends the ride to that', async () => {
     const leadId = await makeLead();
     await run((await enqueueLeadSync(prisma, leadId))!);
     const oldId = (await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId!;
@@ -431,11 +549,42 @@ describe('a test ride', () => {
 
     const result = await run((await enqueueTestRideSync(prisma, await makeRide(leadId)))!);
 
-    expect(result).toMatchObject({ state: 'done', outcome: 'created' });
-    expect(sent('test_ride').map((r) => r.Zoho_CRM_Lead_ID)).toEqual([oldId, '']);
+    expect(result).toMatchObject({ state: 'done', outcome: 'linked' });
     const newId = (await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId;
     expect(newId).not.toBe(oldId);
     expect(newId).toMatch(/^\d{19}$/);
+    expect(sent('test_ride').map((r) => r.Zoho_CRM_Lead_ID)).toEqual([oldId, newId]);
+    expect(crm.rideCount).toBe(1);
+  });
+
+  it('understands the CRM’s older way of saying it does not know a lead id', async () => {
+    const leadId = await makeLead({ crmLeadId: '1456765000001736114' });
+    const rides: string[] = [];
+    const answers: CrmClient = {
+      name: 'older-wording',
+      createLead: async () => ({ kind: 'accepted', message: 'Lead created successfully', leadId: '1456765000001736999', testRideId: null }),
+      createTestRide: async (record) => {
+        rides.push(record.Zoho_CRM_Lead_ID ?? '');
+        return rides.length === 1
+          ? { kind: 'rejected', category: 'rule_failure', message: 'Provided Zoho CRM Lead ID is not available', leadId: null }
+          : { kind: 'accepted', message: 'Test Ride created and mapped to the existing Lead successfully', leadId: '1456765000001736999', testRideId: '1456765000001737000' };
+      },
+      findTestRides: async () => [],
+    };
+
+    expect(await run((await enqueueTestRideSync(prisma, await makeRide(leadId)))!, answers)).toMatchObject({ state: 'done' });
+    expect(rides).toEqual(['1456765000001736114', '1456765000001736999']);
+  });
+
+  it('does not take an ordinary CRM failure on a known lead for a lost lead', async () => {
+    const leadId = await makeLead();
+    await run((await enqueueLeadSync(prisma, leadId))!);
+    const { crmLeadId } = await prisma.lead.findUniqueOrThrow({ where: { id: leadId } });
+    crm.failNext('test_ride', 'api_failure');
+
+    expect(await run((await enqueueTestRideSync(prisma, await makeRide(leadId)))!)).toMatchObject({ state: 'retry' });
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).crmLeadId).toBe(crmLeadId);
+    expect(sent('lead')).toHaveLength(1);
   });
 
   it('after a timeout that DID land, finds the ride instead of making a second one', async () => {
@@ -506,13 +655,25 @@ describe('a test ride', () => {
     expect(crm.rideCount).toBe(1);
   });
 
-  it('with no CRM lead id to look under, sends again', async () => {
+  it('looks under the lead it has just made, when a ride’s first send timed out', async () => {
     const jobId = (await enqueueTestRideSync(prisma, await makeRide(await makeLead())))!;
     crm.failNext('test_ride', 'unreachable');
     const at = soon();
     await run(jobId, crm, at);
-    expect(await run(jobId, crm, new Date(at.getTime() + 61_000))).toMatchObject({ outcome: 'created' });
-    expect(crm.calls.map((c) => c.method)).toEqual(['test_ride', 'test_ride']);
+    expect(await run(jobId, crm, new Date(at.getTime() + 61_000))).toMatchObject({ outcome: 'linked' });
+    expect(crm.calls.map((c) => c.method)).toEqual(['lead', 'test_ride', 'find', 'test_ride']);
+  });
+
+  it('with the lead id lost and a ride in doubt, gets the id back before looking', async () => {
+    const leadId = await makeLead();
+    const jobId = (await enqueueTestRideSync(prisma, await makeRide(leadId)))!;
+    crm.failNext('test_ride', 'timeout_after_commit');
+    const at = soon();
+    await run(jobId, crm, at);
+    await prisma.lead.update({ where: { id: leadId }, data: { crmLeadId: null } });
+
+    expect(await run(jobId, crm, new Date(at.getTime() + 61_000))).toMatchObject({ state: 'done', outcome: 'recovered' });
+    expect(crm.rideCount).toBe(1);
   });
 
   it('waits, without sending, until the scooter has a CRM vehicle id', async () => {

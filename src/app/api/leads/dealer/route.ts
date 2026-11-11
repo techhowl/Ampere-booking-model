@@ -54,7 +54,8 @@ export async function POST(request: NextRequest) {
       route: ROUTE,
       body: { leadId: session.leadId, ...parsed.data },
       handler: async (): Promise<{ statusCode: number; body: unknown }> => {
-        const result = await chooseDealer(prisma, session.leadId, parsed.data.dealerCode);
+        const { dealerCode, ...scooter } = parsed.data;
+        const result = await chooseDealer(prisma, session.leadId, dealerCode, scooter);
         if (result.ok) return { statusCode: 200, body: { dealer: result.dealer } };
 
         return {

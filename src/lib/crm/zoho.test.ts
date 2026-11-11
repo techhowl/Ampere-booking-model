@@ -276,7 +276,7 @@ describe('ZohoCrmClient', () => {
 });
 
 describe('looking up a test ride before a retry', () => {
-  it('asks by lead and IST start time, and reads the ids back', async () => {
+  it('asks by lead and IST start time, in both date fields, and reads the ids back', async () => {
     const { fn, sent } = scriptedFetch([
       ok('{"data":[{"id":"1456765000001730179","Name":"TR-184"}],"info":{"count":1,"more_records":false}}'),
     ]);
@@ -287,8 +287,26 @@ describe('looking up a test ride before a retry', () => {
     expect(found).toEqual(['1456765000001730179']);
     expect(sent[0]!.url).toBe('https://sandbox.zohoapis.in/crm/v7/coql');
     expect(JSON.parse(sent[0]!.body).select_query).toBe(
+      "select id from Test_Rides where (Lead = 1456765000001730169 and (Scheduled_Date_Time = '2026-11-04T15:00:00+05:30' or Test_Ride_Date_Time = '2026-11-04T15:00:00+05:30')) limit 10",
+    );
+  });
+
+  it('asks again by the field the CRM has, when it does not have both', async () => {
+    const noColumn = () => ok('{"code":"INVALID_QUERY","details":{"column_name":"Scheduled_Date_Time"},"message":"column given seems to be invalid","status":"error"}', 400);
+    const { fn, sent } = scriptedFetch([noColumn(), noColumn(), ok('{"data":[{"id":"1456765000001730179"}],"info":{"count":1,"more_records":false}}')]);
+
+    const found = await new ZohoCrmClient(CONFIG, new Tokens(), fn).findTestRides('1456765000001730169', new Date('2026-11-04T09:30:00.000Z'));
+
+    expect(found).toEqual(['1456765000001730179']);
+    expect(JSON.parse(sent[2]!.body).select_query).toBe(
       "select id from Test_Rides where (Lead = 1456765000001730169 and Test_Ride_Date_Time = '2026-11-04T15:00:00+05:30') limit 10",
     );
+  });
+
+  it('gives up with null, not "none", when no date field is accepted', async () => {
+    const noColumn = () => ok('{"code":"INVALID_QUERY","message":"column given seems to be invalid"}', 400);
+    const { fn } = scriptedFetch([noColumn(), noColumn(), noColumn()]);
+    expect(await new ZohoCrmClient(CONFIG, new Tokens(), fn).findTestRides('1', new Date())).toBeNull();
   });
 
   it('reads Zoho’s 204 as "none"', async () => {

@@ -89,8 +89,8 @@ export async function POST(request: NextRequest) {
       data: { phoneVerified: true },
     });
 
-    // Verified, so it may go to Greaves' CRM — sent after this response, never
-    // holding it up. See lib/crm/jobs.ts.
+    // Verified, so it may go to Greaves' CRM: with the booking, or after a
+    // wait if the customer stops before one. See lib/crm/jobs.ts.
     await queueLeadSync(lead.id);
 
     return writeSession(NextResponse.json({ verified: true }, { status: 200 }), {

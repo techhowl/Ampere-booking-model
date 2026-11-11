@@ -199,24 +199,38 @@ export class ZohoCrmClient implements CrmClient {
     // Both values go into a query string, so both are checked to be exactly
     // what they claim — digits, and our own timestamp format.
     if (!/^\d{1,30}$/.test(crmLeadId)) return null;
-    const query =
-      `select id from Test_Rides where (Lead = ${crmLeadId} and ` +
-      `Test_Ride_Date_Time = '${istTimestamp(startsAt)}') limit 10`;
 
-    const exchange = await this.authorised(
-      `${this.config.apiUrl}/crm/v7/coql`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ select_query: query }),
-      },
-      options,
-    );
-    if (exchange.kind !== 'response') return null;
-    if (exchange.status === 204) return []; // Zoho's "no rows"
-    if (exchange.status !== 200) return null;
-    const rows = recordsOf(exchange.body);
-    return rows ? rows.map((row) => row.id) : null;
+    // Greaves moved the ride's time to Scheduled_Date_Time on 2026-11-05; rides
+    // made before then hold it in Test_Ride_Date_Time. An org without one of
+    // them answers 400 INVALID_QUERY, so production can have either or both.
+    const at = istTimestamp(startsAt);
+    const conditions = [
+      `(Scheduled_Date_Time = '${at}' or Test_Ride_Date_Time = '${at}')`,
+      `Scheduled_Date_Time = '${at}'`,
+      `Test_Ride_Date_Time = '${at}'`,
+    ];
+
+    for (const condition of conditions) {
+      const exchange = await this.authorised(
+        `${this.config.apiUrl}/crm/v7/coql`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            select_query: `select id from Test_Rides where (Lead = ${crmLeadId} and ${condition}) limit 10`,
+          }),
+        },
+        options,
+      );
+      if (exchange.kind !== 'response') return null;
+      if (exchange.status === 204) return []; // Zoho's "no rows"
+      if (exchange.status === 200) {
+        const rows = recordsOf(exchange.body);
+        return rows ? rows.map((row) => row.id) : null;
+      }
+      if (exchange.status !== 400 || !exchange.body.includes('INVALID_QUERY')) return null;
+    }
+    return null;
   }
 
   /** The CRM's vehicle models, for `pnpm crm sync-models`. */

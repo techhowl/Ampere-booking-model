@@ -73,6 +73,22 @@ describe('choosing a dealer', () => {
     expect(lead.dealerCode).toBe('AMP-S-003');
   });
 
+  it('keeps the scooter on screen, for a customer who stops here', async () => {
+    await chooseDealer(prisma, leadId, 'AMP-S-003', { modelCode: 'magnus-gmax', colourCode: 'matcha-green' });
+
+    const lead = await prisma.lead.findUniqueOrThrow({ where: { id: leadId } });
+    expect(lead).toMatchObject({ modelCode: 'magnus-gmax', colourCode: 'matcha-green' });
+  });
+
+  it('ignores a scooter we do not sell, and a colour that scooter does not come in', async () => {
+    await chooseDealer(prisma, leadId, 'AMP-S-003', { modelCode: MODEL, colourCode: 'carbon-knight' });
+    await chooseDealer(prisma, leadId, 'AMP-S-003', { modelCode: 'not-a-scooter', colourCode: 'matcha-green' });
+    expect(await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).toMatchObject({ modelCode: MODEL, colourCode: 'carbon-knight' });
+
+    await chooseDealer(prisma, leadId, 'AMP-S-003', { modelCode: MODEL, colourCode: 'matcha-green' });
+    expect(await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).toMatchObject({ modelCode: MODEL, colourCode: null });
+  });
+
   it('refuses a dealer we would not offer for this pincode', async () => {
     const result = await chooseDealer(prisma, leadId, 'AMP-S-009');
 

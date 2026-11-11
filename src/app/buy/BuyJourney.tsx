@@ -379,6 +379,8 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabl
           cached={nearby}
           onLoaded={setNearby}
           preferredCode={dealer?.code ?? prefill.dealerCode}
+          modelCode={modelCode}
+          colourCode={colourCode}
           onConfirmed={(chosen) => {
             setDealer(chosen);
             go(buyEnabled ? 'journey' : 'finish');
