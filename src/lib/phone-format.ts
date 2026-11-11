@@ -35,7 +35,9 @@ export function isValidPhone(input: string): boolean {
 }
 
 /** Indian pincodes: 6 digits, never starting with 0. */
-const PINCODE = /^[1-9]\d{5}$/;
+// A first digit of 9 is the Army Post Service, never a customer's address. Not
+// checked against India Post's list: it omits real pincodes (560039, 560069).
+const PINCODE = /^[1-8]\d{5}$/;
 
 export function isValidPincode(input: string): boolean {
   return PINCODE.test(input.trim());
