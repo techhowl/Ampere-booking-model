@@ -11,6 +11,9 @@
  * Swapping in the real client later is a constructor change.
  */
 
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { env } from '@/lib/env';
+
 export type JuspayStatus = 'CHARGED' | 'PENDING' | 'AUTHORIZATION_FAILED' | 'NEW';
 
 export interface CreateOrderInput {
@@ -105,9 +108,28 @@ export class FakeJuspayClient implements JuspayClient {
     return { orderId, status, amountPaid: status === 'CHARGED' ? 104250 : undefined, raw: { scenario } };
   }
 
-  /** The fake accepts "valid-signature" and rejects everything else. */
-  verifyWebhook(_rawBody: string, authHeader: string): boolean {
-    return authHeader === 'valid-signature';
+  /**
+   * The fake accepts only the credential the stand-in checkout was handed for
+   * that one order: see fakeWebhookAuthorization().
+   *
+   * It used to accept a constant, "valid-signature", which was in the page's
+   * own JavaScript. Anyone could send it, for any order, and mark it paid
+   * wherever the fake was running (security audit V-01).
+   */
+  verifyWebhook(rawBody: string, authHeader: string): boolean {
+    const orderId = webhookOrderId(rawBody);
+    if (!orderId || !authHeader) return false;
+
+    let expected: string;
+    try {
+      expected = fakeWebhookAuthorization(orderId);
+    } catch {
+      // No SESSION_SECRET: nothing can be verified, so nothing is.
+      return false;
+    }
+    const a = Buffer.from(expected, 'utf8');
+    const b = Buffer.from(authHeader.trim(), 'utf8');
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 
   async cancelOrder(orderId: string, reason: string): Promise<void> {
@@ -116,6 +138,64 @@ export class FakeJuspayClient implements JuspayClient {
 
   /** What a test asserts against after an expiry sweep. */
   readonly cancelled = new Map<string, string>();
+}
+
+/**
+ * The Authorization header the stand-in checkout sends for one order.
+ *
+ * An HMAC of the order id under SESSION_SECRET: stable across instances (the
+ * page and the webhook can land on different serverless functions on UAT), and
+ * useless for any other order. The pay page hands it only to the browser that
+ * owns the order.
+ */
+export function fakeWebhookAuthorization(orderId: string): string {
+  const mac = createHmac('sha256', env.sessionSecret)
+    .update(`fake-juspay-webhook:${orderId}`)
+    .digest('base64url');
+  return `Fake ${mac}`;
+}
+
+/** The order id in a webhook body, in either of the envelopes the route accepts. */
+function webhookOrderId(rawBody: string): string | null {
+  try {
+    const payload = JSON.parse(rawBody) as Record<string, unknown>;
+    const content = (payload.content ?? payload) as Record<string, unknown>;
+    const order = (content.order ?? content) as Record<string, unknown>;
+    return typeof order.order_id === 'string' ? order.order_id : null;
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Unconfigured — what a live deployment gets without Juspay           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Production with JUSPAY_ENABLED off. Before this existed, production fell
+ * back to the fake: a status API that answers CHARGED for every order and a
+ * stand-in checkout that "pays" with one click (security audit V-01).
+ *
+ * This takes no payment and confirms none. Starting a payment fails; asking
+ * for a status fails, which resolveOnReturn turns into `unknown` rather than a
+ * guess; no webhook verifies; cancelling has nothing to cancel.
+ */
+export class UnconfiguredJuspayClient implements JuspayClient {
+  async createOrder(): Promise<CreateOrderResult> {
+    throw new Error('Juspay is not configured: set JUSPAY_ENABLED=true and the JUSPAY_* credentials.');
+  }
+
+  async getOrderStatus(): Promise<OrderStatusResult> {
+    throw new Error('Juspay is not configured.');
+  }
+
+  async cancelOrder(): Promise<void> {
+    // No payment link was ever created.
+  }
+
+  verifyWebhook(): boolean {
+    return false;
+  }
 }
 
 /* ------------------------------------------------------------------ */

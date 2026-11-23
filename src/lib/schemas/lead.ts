@@ -26,6 +26,33 @@ export const consentSchema = z.object({
   marketing: z.boolean(),
 });
 
+/** Attribution maps are kept to this, in the same limits the page itself parses with. */
+export const ATTRIBUTION_MAX_KEYS = 40;
+const ATTRIBUTION_MAX_KEY_LENGTH = 64;
+const ATTRIBUTION_MAX_VALUE_LENGTH = 255;
+
+/**
+ * A string map, trimmed to a sane size rather than refused.
+ *
+ * It arrives from the browser, so it was unbounded: the security audit stored
+ * 800 KB of it on one lead (V-04). Refusing would lose the lead over a long ad
+ * link, and the lead matters more than its attribution, so anything past the
+ * limits is cut. Real links sit far inside them; prefill.ts already clamps
+ * values to 255.
+ */
+const boundedStringMap = z
+  .record(z.string(), z.string())
+  .transform((map) =>
+    Object.fromEntries(
+      Object.entries(map)
+        .slice(0, ATTRIBUTION_MAX_KEYS)
+        .map(([key, value]) => [
+          key.slice(0, ATTRIBUTION_MAX_KEY_LENGTH),
+          value.slice(0, ATTRIBUTION_MAX_VALUE_LENGTH),
+        ]),
+    ),
+  );
+
 /**
  * Attribution. Passed through from the page, which parsed it server-side from
  * the query string. Not security-sensitive — it decides which report a lead
@@ -33,11 +60,11 @@ export const consentSchema = z.object({
  */
 export const attributionSchema = z.object({
   src: z.string().max(64).nullable().optional(),
-  utm: z.record(z.string(), z.string()).nullable().optional(),
+  utm: boundedStringMap.nullable().optional(),
   gclid: z.string().max(255).nullable().optional(),
   fbclid: z.string().max(255).nullable().optional(),
   /** The full original query string, whatever we managed to parse from it. */
-  sourceRaw: z.record(z.string(), z.string()).nullable().optional(),
+  sourceRaw: boundedStringMap.nullable().optional(),
 });
 
 /** The customer-facing wording is from Ampere's copy document. */

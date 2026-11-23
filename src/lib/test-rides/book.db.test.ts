@@ -333,3 +333,35 @@ describe('help topics', () => {
     expect(result.ok && result.booking.helpTopic).toBeNull();
   });
 });
+
+describe('how many rides one lead may hold (audit V-11)', () => {
+  const days = ['2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09'];
+
+  it('books up to three upcoming rides, then refuses a fourth', async () => {
+    for (const slotDate of days.slice(0, 3)) {
+      expect((await bookTestRide(prisma, notifier, input({ slotDate }), NOW)).ok).toBe(true);
+    }
+    const fourth = await bookTestRide(prisma, notifier, input({ slotDate: days[3] }), NOW);
+    expect(fourth).toEqual({ ok: false, reason: 'too_many_bookings' });
+    expect(await prisma.testRide.count()).toBe(3);
+  });
+
+  it('still returns an existing booking for the same slot at the limit', async () => {
+    for (const slotDate of days.slice(0, 3)) await bookTestRide(prisma, notifier, input({ slotDate }), NOW);
+    const again = await bookTestRide(prisma, notifier, input({ slotDate: days[0] }), NOW);
+    expect(again.ok).toBe(true);
+  });
+
+  it('does not count rides that are over or cancelled', async () => {
+    await prisma.testRide.createMany({
+      data: [
+        { leadId, dealerCode: 'AMP-S-001', modelCode: 'nexus-ex-plus', mode: 'dealer', slotDate: new Date('2026-10-01'), slotWindow: 'w1', status: 'booked' },
+        { leadId, dealerCode: 'AMP-S-001', modelCode: 'nexus-ex-plus', mode: 'dealer', slotDate: new Date('2026-10-02'), slotWindow: 'w1', status: 'booked' },
+        { leadId, dealerCode: 'AMP-S-001', modelCode: 'nexus-ex-plus', mode: 'dealer', slotDate: new Date('2026-10-06'), slotWindow: 'w1', status: 'cancelled' },
+      ],
+    });
+    for (const slotDate of days.slice(0, 3)) {
+      expect((await bookTestRide(prisma, notifier, input({ slotDate }), NOW)).ok).toBe(true);
+    }
+  });
+});

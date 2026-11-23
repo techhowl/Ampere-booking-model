@@ -34,7 +34,14 @@ const OUTCOMES: { id: Outcome; label: string; blurb: string }[] = [
   },
 ];
 
-export function FakeCheckout({ orderId }: { orderId: string }) {
+export function FakeCheckout({
+  orderId,
+  webhookAuthorization,
+}: {
+  orderId: string;
+  /** From the server, for this order only. See fakeWebhookAuthorization(). */
+  webhookAuthorization: string;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<Outcome | null>(null);
 
@@ -48,11 +55,12 @@ export function FakeCheckout({ orderId }: { orderId: string }) {
         headers: {
           'Content-Type': 'application/json',
           // Where the webhook route reads it — Juspay authenticates webhooks
-          // with this header. The fake client accepts this value and nothing
-          // else. (It was sent as x-juspay-signature, which the route never
-          // reads, so every "Payment fails" was ignored and then resolved as
-          // paid by the status API.)
-          Authorization: 'valid-signature',
+          // with this header. The fake client accepts only the value the
+          // server minted for this order, so it cannot be replayed against
+          // anyone else's. (It was sent as x-juspay-signature, which the route
+          // never reads, so every "Payment fails" was ignored and then
+          // resolved as paid by the status API.)
+          Authorization: webhookAuthorization,
         },
         body: JSON.stringify({
           event_name: 'ORDER_SUCCEEDED',

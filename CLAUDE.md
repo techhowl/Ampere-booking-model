@@ -75,10 +75,28 @@ credentials have not arrived yet. Build and test the complete payment flow —
 including reconciliation — against the fake. Do not block on real access.
 Same pattern for SMS and WhatsApp.
 
-Greaves CRM.Next (the dealer management system) is live in **sandbox**:
-`CRM_PROVIDER=zoho`, with `FakeCrmClient` for tests. Production credentials
-come after Greaves' go-live approval. Zoho ids are per environment — data in
-`crm_vehicle_models` and `dealers.crm_id`, never in code.
+Greaves CRM.Next (the dealer management system): **sandbox** locally and on
+UAT, **live** (`https://www.zohoapis.in`) in production from 23 Nov 2026,
+with `FakeCrmClient` for tests. Live credentials live only in the droplet's
+`deploy/.env.production`; never use them locally, and never write to the live
+CRM from here. Zoho ids are per environment — data in `crm_vehicle_models`
+and `dealers.crm_id`, never in code.
+
+## The Zoho pilot (23 Nov 2026 until the big-bang release, 1 Dec)
+
+Configuration, not code; see `deploy/README.md` and `docs/greaves-crm/`:
+
+- `PILOT_DEALER_CRM_IDS`: only these 11 dealers are offered
+  (`src/lib/dealers/offered.ts`). Everyone else is on Goal App.
+- `GOAL_APP_URL`: /buy asks the pincode first, in a popup
+  (`src/app/buy/gate.ts`), and redirects customers no pilot dealer serves to
+  Goal App before they give any details. A lead that later moves outside the
+  pilot is not sent to Zoho. The popup exists only while both settings are set.
+- `OTP_REQUIRED=false`: no OTP in production until the SMS sender clears
+  DLT. Leads still save with `phoneVerified: false` and go to the CRM
+  unverified (Greaves' call centre qualifies them). Gate checks go through
+  `leadMayProceed()` (`src/lib/otp/policy.ts`). Buy Now always needs a
+  verified number.
 
 ## Known unknowns — ask before assuming
 
@@ -87,6 +105,7 @@ come after Greaves' go-live approval. Zoho ids are per environment — data in
 - Region definitions (which states map to which region) are not yet supplied.
   Inventory is keyed on region, so use seeded placeholder data for now.
 - The dealer master comes from the CRM: `pnpm crm sync-dealers` (Greaves'
-  `get_dealers`). It has no street address, phone or coordinates yet; dealers
-  are placed at their pincode's centre. The pincode-to-region mapping is
-  still placeholder data.
+  `get_dealers`), vehicle ids from `pnpm crm sync-models` (`get_products`).
+  On the droplet both run in the `tools` compose service. The dealer master has
+  no street address, phone or coordinates yet; dealers are placed at their
+  pincode's centre. The pincode-to-region mapping is still placeholder data.

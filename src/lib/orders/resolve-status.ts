@@ -7,6 +7,8 @@ import {
   type JuspayClient,
   type ResolvedStatus,
 } from '@/lib/juspay/juspay';
+import { normaliseStatus } from '@/lib/juspay/real-client';
+import { consume } from '@/lib/rate-limit/rate-limit';
 
 /**
  * Turning a Juspay signal into our order status, and acting on it.
@@ -71,8 +73,28 @@ export async function applyStatus(
   const order = await prisma.order.findUnique({ where: { orderId } });
   if (!order) return 'unknown';
 
+  /*
+   * Less money than we asked for is not paid. Juspay fixes the amount when the
+   * session is created, so this should never fire; if it does, the order waits
+   * as pending for a person rather than releasing a scooter (audit V-10).
+   * Paying more (a surcharge) is left alone.
+   */
+  let effective = incoming;
+  if (
+    incoming === 'paid' &&
+    detail?.amountPaid != null &&
+    detail.amountPaid < order.amountCharged.toNumber() - 0.005
+  ) {
+    console.error('[payments] paid less than the amount charged; held as pending', {
+      orderId,
+      amountPaid: detail.amountPaid,
+      amountCharged: order.amountCharged.toFixed(2),
+    });
+    effective = 'pending';
+  }
+
   const current = toResolved(order.status);
-  const settled = nextStatus(current, incoming);
+  const settled = nextStatus(current, effective);
 
   // Nothing changed — a duplicate webhook, or one that arrived out of order.
   if (settled === current && order.status !== 'initiated') return settled;
@@ -159,36 +181,84 @@ export async function resolveForReturn(
   };
 }
 
+export interface WebhookRecord {
+  orderId: string;
+  eventType: string | null;
+  signatureValid: boolean;
+  payload: unknown;
+  status: string;
+  amountPaid?: number | null;
+  /** The caller's IP. Bounds how many unverified calls one sender can log. */
+  ip?: string | null;
+  /** Size of the body as received, kept in place of an unverified body. */
+  rawBytes?: number;
+}
+
 /**
  * The webhook path. Signature is verified by the caller; this records the raw
  * payload before interpreting it, so a dispute in month four has an answer.
  */
 export async function recordWebhook(
   prisma: PrismaClient,
-  params: {
-    orderId: string;
-    eventType: string | null;
-    signatureValid: boolean;
-    payload: unknown;
-    status: string;
-    amountPaid?: number | null;
-  },
+  params: WebhookRecord,
 ): Promise<ResolvedStatus> {
+  // Spec 15: unsigned payloads are logged and dropped.
+  if (!params.signatureValid) {
+    await recordUnverified(prisma, params);
+    return 'unknown';
+  }
+
   await prisma.paymentEvent.create({
     data: {
       orderId: params.orderId,
       eventType: params.eventType,
-      signatureValid: params.signatureValid,
+      signatureValid: true,
       rawPayload: params.payload as never,
     },
   });
 
-  // Spec 15: unsigned payloads are logged and dropped. The row above is the log.
-  if (!params.signatureValid) return 'unknown';
-
-  const incoming = mapJuspayStatus(params.status as never);
+  // The same vocabulary as the status API: Juspay sends more than four values.
+  const incoming = mapJuspayStatus(normaliseStatus(params.status));
   return applyStatus(prisma, params.orderId, incoming, 'webhook', {
     amountPaid: params.amountPaid ?? null,
     raw: params.status,
+  });
+}
+
+/** Per sender, how many failed-authentication webhooks are kept on record. */
+const UNVERIFIED_LOG_LIMIT = { max: 30, windowSeconds: 3600 };
+
+/**
+ * A webhook that failed authentication: on record, acted on by nothing.
+ *
+ * Kept as a short summary, never the body, and only for an order that exists.
+ * This endpoint is open to anyone, and storing whatever they sent let a
+ * stranger write rows of any size for made-up orders (audit V-05). A real
+ * Juspay call that fails because the credential is misconfigured still leaves
+ * a trace against its real order, which is what that row is for.
+ */
+async function recordUnverified(prisma: PrismaClient, params: WebhookRecord): Promise<void> {
+  const orderId = params.orderId.slice(0, 64);
+  const order = await prisma.order.findUnique({ where: { orderId }, select: { orderId: true } });
+  if (!order) return;
+
+  if (params.ip) {
+    const decision = await consume(prisma, 'webhook_unverified', [
+      { kind: 'ip', subject: params.ip, ...UNVERIFIED_LOG_LIMIT },
+    ]);
+    if (!decision.allowed) return;
+  }
+
+  await prisma.paymentEvent.create({
+    data: {
+      orderId,
+      eventType: params.eventType?.slice(0, 64) ?? null,
+      signatureValid: false,
+      rawPayload: {
+        unverified: true,
+        status: params.status.slice(0, 64),
+        bytes: params.rawBytes ?? null,
+      },
+    },
   });
 }

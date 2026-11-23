@@ -1,6 +1,10 @@
 import type { CrmJob, Dealer, Lead, Prisma, PrismaClient, TestRide } from '@prisma/client';
 import { getModel } from '@/lib/catalog/catalog';
 import { decryptPhone } from '@/lib/crypto/phone';
+import { findNearbyDealers } from '@/lib/dealers/nearby';
+import { isOffered, pilotActive } from '@/lib/dealers/offered';
+import { env } from '@/lib/env';
+import { leadMayProceed } from '@/lib/otp/policy';
 import {
   buildLeadRecord,
   buildTestRideRecord,
@@ -100,8 +104,10 @@ export async function enqueueLeadSync(
     select: { phoneVerified: true, phoneHash: true },
   });
   // Unverified numbers stay out of the CRM: it has no "verified" flag, and a
-  // dealer would ring a number that may be a typo or someone else's.
-  if (!lead?.phoneVerified) return null;
+  // dealer would ring a number that may be a typo or someone else's. The one
+  // exception is OTP_REQUIRED=false, agreed with Greaves for the pilot: their
+  // call centre qualifies every such lead before a dealer sees it.
+  if (!lead || !leadMayProceed(lead)) return null;
 
   const dedupeKey = `lead:${leadId}:${lead.phoneHash}`;
   const job = await prisma.crmJob.upsert({
@@ -111,9 +117,10 @@ export async function enqueueLeadSync(
     select: { id: true },
   });
   // A job closed because the number had changed comes back when that number
-  // is verified again: A, then B, then A again.
+  // is verified again: A, then B, then A again. So does one closed as outside
+  // the pilot, when the customer moves to a pincode a pilot dealer serves.
   await prisma.crmJob.updateMany({
-    where: { id: job.id, status: 'done', outcome: { in: ['superseded', 'not_verified'] } },
+    where: { id: job.id, status: 'done', outcome: { in: ['superseded', 'not_verified', 'outside_pilot'] } },
     data: { status: 'pending', attempts: 0, nextAttemptAt, outcome: null, completedAt: null },
   });
   return job.id;
@@ -412,7 +419,7 @@ async function processLead(context: Context): Promise<Step> {
   // The customer changed their number after this job was queued. The new
   // number, once verified, has its own job.
   if (job.phoneHash && lead.phoneHash !== job.phoneHash) return done('superseded');
-  if (!lead.phoneVerified) return done('not_verified');
+  if (!leadMayProceed(lead)) return done('not_verified');
 
   // A test ride got there first and the CRM already knows this customer. The
   // id is cleared whenever the number changes, so it is this number's.
@@ -424,10 +431,32 @@ async function processLead(context: Context): Promise<Step> {
     orderBy: { createdAt: 'desc' },
     include: { dealer: true },
   });
-  const snapshot = await snapshotOf(prisma, lead, ride ? choicesOf(ride) : {});
+
+  let choices: Parameters<typeof snapshotOf>[2] = ride ? choicesOf(ride) : {};
+  if (!ride && pilotActive()) {
+    const dealer = await pilotDealerFor(prisma, lead);
+    if (!dealer) return done('outside_pilot');
+    choices = { dealer };
+  }
+  const snapshot = await snapshotOf(prisma, lead, choices);
 
   const sent = await sendLead(context, lead, snapshot, false);
   return sent.ok ? done(sent.outcome, { crmLeadId: sent.crmLeadId }) : sent.step;
+}
+
+/**
+ * The dealer a lead goes to the CRM with during the Zoho pilot
+ * (PILOT_DEALER_CRM_IDS): the one the customer chose, else the nearest pilot
+ * dealer to their pincode, which is the one the dealer step preselects.
+ *
+ * Never none. Sent without a dealer, the CRM picks one by pincode, and that may
+ * be a dealer still on Goal App. Null means no pilot dealer serves the
+ * customer: Goal App does, so the CRM is not told about them.
+ */
+async function pilotDealerFor(prisma: PrismaClient, lead: Lead & { dealer: Dealer | null }): Promise<Dealer | null> {
+  if (lead.dealer && isOffered(lead.dealer)) return lead.dealer;
+  const nearest = (await findNearbyDealers(prisma, lead.pincode)).dealers[0];
+  return nearest ? prisma.dealer.findUnique({ where: { dealerCode: nearest.code } }) : null;
 }
 
 type LeadSent =
@@ -491,8 +520,8 @@ async function processTestRide(context: Context): Promise<Step> {
 
   const lead = ride.lead;
   // The customer changed their number after booking and has not verified the
-  // new one. Its owner is unproven, so the ride waits.
-  if (!lead.phoneVerified) {
+  // new one. Its owner is unproven, so the ride waits. (Never, with the OTP off.)
+  if (!leadMayProceed(lead)) {
     return retry('the customer changed their number and has not verified it yet', !previousSettled);
   }
   const startsAt = crmSlotStart(ride.slotDate, ride.slotWindow);
@@ -740,9 +769,11 @@ export async function reconcileMissingJobs(
   const since = new Date(now.getTime() - lookbackHours * 3_600_000).toISOString();
   const before = new Date(now.getTime() - graceMs).toISOString();
 
+  // With the OTP off, an unverified lead is owed a job too (lib/otp/policy.ts).
+  const unverifiedToo = !env.otpRequired;
   const leads = await prisma.$queryRaw<{ id: string }[]>`
     SELECT l.id::text AS id FROM leads l
-    WHERE l.phone_verified AND l.crm_lead_id IS NULL
+    WHERE (l.phone_verified OR ${unverifiedToo}) AND l.crm_lead_id IS NULL
       AND l.created_at >= ${since}::timestamp AND l.updated_at <= ${before}::timestamp
       AND NOT EXISTS (
         SELECT 1 FROM crm_jobs j WHERE j.dedupe_key = 'lead:' || l.id::text || ':' || l.phone_hash

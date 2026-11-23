@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
 import { requireJourney, writeSession } from '@/lib/http/session';
+import { readJsonBody } from '@/lib/http/body';
 import { createOrderSchema } from '@/lib/schemas/order';
 import { createOrder, OrderError } from '@/lib/orders/create-order';
 import { getJuspayClient } from '@/lib/juspay/client';
@@ -37,14 +38,10 @@ export async function POST(request: NextRequest) {
   if (!gate.ok) return gate.response;
   const { session } = gate;
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
-  }
+  const json = await readJsonBody(request);
+  if (!json.ok) return json.response;
 
-  const parsed = createOrderSchema.safeParse(raw);
+  const parsed = createOrderSchema.safeParse(json.value);
   if (!parsed.success) {
     return NextResponse.json({ error: 'validation_failed' }, { status: 422 });
   }

@@ -7,9 +7,11 @@ import { syncDealers } from '../src/lib/crm/dealers';
 import { FakeCrmClient } from '../src/lib/crm/fake';
 import { reconcileMissingJobs, requeueDeadJobs, runDueJobs } from '../src/lib/crm/jobs';
 import { buildLeadRecord, buildTestRideRecord, crmSlotStart } from '../src/lib/crm/payload';
+import { coloursMissingFrom, ProductListError, productsFor, type CrmProduct } from '../src/lib/crm/products';
 import { PrismaTokenProvider } from '../src/lib/crm/token-store';
 import type { CrmClient } from '../src/lib/crm/types';
 import { ZohoCrmClient } from '../src/lib/crm/zoho';
+import { env } from '../src/lib/env';
 
 /**
  * Greaves CRM.Next, by hand.
@@ -17,7 +19,7 @@ import { ZohoCrmClient } from '../src/lib/crm/zoho';
  *   pnpm crm status                    what is queued, stuck or dead; what is unmapped
  *   pnpm crm send                      send everything due now (what the cron does)
  *   pnpm crm requeue [jobId ...]       dead jobs get a fresh set of attempts
- *   pnpm crm sync-models               read the CRM's vehicle ids into crm_vehicle_models
+ *   pnpm crm sync-models               read the CRM's vehicle ids (get_products) into crm_vehicle_models
  *   pnpm crm sync-dealers [--dry-run] [--force]
  *                                      make our dealers match the CRM's dealer master
  *   pnpm crm link-dealer <code> <id>   set one dealer's CRM account id
@@ -47,7 +49,6 @@ function configuredClient(): CrmClient {
   return new FakeCrmClient();
 }
 
-const normalise = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 async function status(): Promise<void> {
   const settings = crmSettings();
@@ -76,6 +77,37 @@ async function status(): Promise<void> {
   const dealersWithout = await prisma.dealer.count({ where: { active: true, crmId: null } });
   console.log(`\nVehicle models without a CRM id: ${unmapped.length ? unmapped.join(', ') : 'none'}`);
   console.log(`Active dealers without a CRM id: ${dealersWithout}`);
+
+  const outside = await prisma.crmJob.count({ where: { outcome: 'outside_pilot' } });
+  if (outside) console.log(`Leads not sent because no pilot dealer serves them (Goal App's): ${outside}`);
+
+  await pilotStatus();
+}
+
+/**
+ * Each PILOT_DEALER_CRM_IDS entry, as the page will see it. Only a dealer that
+ * is here, active and located can be offered to anyone.
+ */
+async function pilotStatus(): Promise<void> {
+  const ids = env.pilotDealerCrmIds;
+  if (!ids) {
+    console.log('\nDealers offered: every active dealer (PILOT_DEALER_CRM_IDS is not set).');
+    return;
+  }
+  const rows = await prisma.dealer.findMany({ where: { crmId: { in: ids }, active: true } });
+  let offered = 0;
+  console.log(`\nPilot dealers (PILOT_DEALER_CRM_IDS, ${ids.length}):`);
+  for (const id of ids) {
+    const dealer = rows.find((d) => d.crmId === id);
+    const state = !dealer
+      ? 'NOT IN OUR DEALERS: run pnpm crm sync-dealers, or the CRM lacks it'
+      : dealer.lat === null
+        ? 'NO LOCATION: its pincode is missing from pincode_geo, so no search finds it'
+        : 'offered';
+    if (state === 'offered') offered += 1;
+    console.log(`  ${id}  ${(dealer?.name ?? '?').padEnd(28)} ${dealer?.address ?? ''}  ${state}`);
+  }
+  console.log(`${offered} of ${ids.length} pilot dealers can be offered.`);
 }
 
 async function send(): Promise<void> {
@@ -91,13 +123,29 @@ async function requeue(ids: string[]): Promise<void> {
   console.log(`${count} dead job(s) requeued. Run \`pnpm crm send\`, or wait for the cron.`);
 }
 
+/**
+ * Greaves' get_products, the list the live collection names. An org without
+ * that function (the sandbox, until Greaves add it) is read the old way, from
+ * the Vehicle_Models module, which carries no family or colours.
+ */
+async function crmProducts(client: ZohoCrmClient): Promise<CrmProduct[]> {
+  try {
+    return await client.listProducts();
+  } catch (error) {
+    if (!(error instanceof ProductListError)) throw error;
+    console.log(`get_products is not usable here (${error.message}); reading Vehicle_Models instead.\n`);
+    return (await client.listVehicleModels()).map((v) => ({ ...v, family: '', colours: [] }));
+  }
+}
+
 async function syncModels(): Promise<void> {
-  const crm = await zohoClient().listVehicleModels();
+  const crm = await crmProducts(zohoClient());
   console.log(`The CRM has ${crm.length} vehicle model(s).\n`);
 
   let problems = 0;
+  const colourNotes: string[] = [];
   for (const model of MODELS) {
-    const matches = crm.filter((v) => normalise(v.name) === normalise(model.name));
+    const matches = productsFor(model.name, crm);
     const match = matches.length === 1 ? matches[0] : undefined;
     if (!match) {
       problems += 1;
@@ -110,11 +158,22 @@ async function syncModels(): Promise<void> {
       update: { crmId: match.id, crmName: match.name },
     });
     console.log(`  ${model.code.padEnd(26)} -> ${match.id}  "${match.name}"`);
+
+    // Colour_Preference goes on every lead as our colour's name. Worth knowing
+    // when the CRM lists that scooter in other colours.
+    const missing = match.colours.length ? coloursMissingFrom(match, model.colours.map((c) => c.name)) : [];
+    if (missing.length) {
+      colourNotes.push(`  ${model.name}: we offer ${missing.join(', ')}; the CRM lists ${match.colours.join(', ')}`);
+    }
   }
 
-  const ours = new Set(MODELS.map((m) => normalise(m.name)));
-  const extra = crm.filter((v) => !ours.has(normalise(v.name))).map((v) => v.name);
+  const matched = new Set(MODELS.flatMap((m) => productsFor(m.name, crm).map((p) => p.id)));
+  const extra = crm.filter((v) => !matched.has(v.id)).map((v) => v.name);
   if (extra.length) console.log(`\nIn the CRM but not on the page (ignored): ${extra.join(', ')}`);
+  if (colourNotes.length) {
+    console.log('\nColours on the page that the CRM does not list for that scooter (sent anyway):');
+    for (const note of colourNotes) console.log(note);
+  }
   if (problems) {
     process.exitCode = 1;
     console.log(`\n${problems} model(s) unmatched. Test rides for them cannot be sent.`);

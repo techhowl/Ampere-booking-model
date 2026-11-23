@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
 import { recordWebhook } from '@/lib/orders/resolve-status';
 import { getJuspayClient } from '@/lib/juspay/client';
+import { BodyTooLargeError, readBodyText } from '@/lib/http/body';
+import { clientIp } from '@/lib/http/request';
 
 /**
  * POST /api/webhooks/juspay — the source of truth.
@@ -13,17 +15,31 @@ import { getJuspayClient } from '@/lib/juspay/client';
  * Always returns 200. Juspay re-sends until it gets one, and retrying a
  * payload we have already stored helps nobody — delivery is at-least-once, so
  * recordWebhook is idempotent. Unverified payloads are recorded and dropped
- * per spec 15: the row in payment_events IS the log.
+ * per spec 15: payment_events keeps a short summary of each, for real orders
+ * only (see recordWebhook).
  *
  * Authenticity is HTTP Basic auth, not a signature — Juspay replays the
  * username and password we set on their dashboard. That credential is
  * replayable by anyone who sees it, which is why this endpoint is HTTPS-only.
+ *
+ * The one non-200: a body over WEBHOOK_MAX_BYTES. Juspay's order payloads are
+ * a few KB; anything this size is not from them.
  */
 
 export const dynamic = 'force-dynamic';
 
+const WEBHOOK_MAX_BYTES = 256 * 1024;
+
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
+  let rawBody: string;
+  try {
+    rawBody = await readBodyText(request, WEBHOOK_MAX_BYTES);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return NextResponse.json({ error: 'payload_too_large' }, { status: 413 });
+    }
+    throw error;
+  }
   const authHeader = request.headers.get('authorization') ?? '';
 
   let payload: Record<string, unknown>;
@@ -54,6 +70,8 @@ export async function POST(request: NextRequest) {
     payload,
     status,
     amountPaid: typeof amount === 'number' ? amount : null,
+    ip: clientIp(request),
+    rawBytes: Buffer.byteLength(rawBody, 'utf8'),
   });
 
   return NextResponse.json({ received: true }, { status: 200 });

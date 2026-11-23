@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireJourney, writeSession } from '@/lib/http/session';
+import { readJsonBody } from '@/lib/http/body';
 import { changePincodeSchema, PINCODE_INVALID_MESSAGE } from '@/lib/schemas/lead';
 import { changePincode } from '@/lib/leads/change-pincode';
+import { queueLeadSync } from '@/lib/crm/schedule';
 import {
   IDEMPOTENCY_HEADER,
   IdempotencyInFlightError,
@@ -18,6 +20,8 @@ import {
  */
 
 export const dynamic = 'force-dynamic';
+/** CRM sends that have come due run after the response, inside this time. */
+export const maxDuration = 60;
 
 const ROUTE = 'POST /api/leads/pincode';
 
@@ -32,14 +36,10 @@ export async function POST(request: NextRequest) {
   if (!gate.ok) return gate.response;
   const { session } = gate;
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
-  }
+  const json = await readJsonBody(request);
+  if (!json.ok) return json.response;
 
-  const parsed = changePincodeSchema.safeParse(raw);
+  const parsed = changePincodeSchema.safeParse(json.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: 'validation_failed', message: PINCODE_INVALID_MESSAGE },
@@ -61,6 +61,11 @@ export async function POST(request: NextRequest) {
         };
       },
     });
+
+    // A lead closed as outside the pilot is owed to the CRM again once a pilot
+    // dealer serves the new pincode. Queueing is idempotent; the job reads the
+    // lead as it is when it runs.
+    if (statusCode === 200) await queueLeadSync(session.leadId);
 
     return writeSession(NextResponse.json(body, { status: statusCode }), session);
   } catch (error) {

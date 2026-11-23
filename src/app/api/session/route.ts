@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { isActive } from '@/lib/crypto/session';
+import { env } from '@/lib/env';
 import { clearSession, readSession, writeSession } from '@/lib/http/session';
 import { JOURNEY_COOKIE } from '@/app/buy/journey-state';
 
@@ -23,8 +24,13 @@ export async function POST(request: NextRequest) {
   if (!session || !isActive(session)) {
     return NextResponse.json({ active: false, verified: false }, { headers: noStore });
   }
+  // "verified" answers the page's real question, may this journey carry on:
+  // with the OTP off (OTP_REQUIRED=false), yes for any live session.
   return writeSession(
-    NextResponse.json({ active: true, verified: session.verified }, { headers: noStore }),
+    NextResponse.json(
+      { active: true, verified: session.verified || !env.otpRequired },
+      { headers: noStore },
+    ),
     session,
   );
 }

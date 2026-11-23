@@ -21,6 +21,7 @@ const SANDBOX: ZohoConfig = {
   leadFunction: 'lead',
   testRideFunction: 'ride',
   dealersFunction: 'dealers',
+  productsFunction: 'products',
   timeoutMs: 1000,
 };
 

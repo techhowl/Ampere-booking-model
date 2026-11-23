@@ -56,6 +56,11 @@ export interface CleanedLocations {
 export const CORRECTIONS: Record<string, { lat: number; lng: number; note: string }> = {
   '560038': { lat: 12.9784, lng: 77.6408, note: 'Indiranagar, Bengaluru: its only office is recorded 8 km west' },
   '700091': { lat: 22.5697, lng: 88.4322, note: 'Salt Lake, Kolkata: all three offices recorded 30 km south-west' },
+  '500064': {
+    lat: 17.3313,
+    lng: 78.4676,
+    note: 'Falaknuma, Hyderabad: recorded 37 km north-east, out of line with 500005 and 500053 beside it. Sanstech Automotive, a Zoho pilot dealer, is here',
+  },
 };
 
 /** An office this far from its sorting district's centre is taken as a typo. */

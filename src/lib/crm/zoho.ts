@@ -1,5 +1,6 @@
 import { isSandboxHost, type ZohoConfig } from './config';
 import { DealerListError, parseDealerList, type DealerList } from './dealers';
+import { parseProductList, ProductListError, type CrmProduct } from './products';
 import type { CallOptions, CrmClient, CrmRecord, CrmResult } from './types';
 
 /**
@@ -260,6 +261,20 @@ export class ZohoCrmClient implements CrmClient {
     if (exchange.kind === 'token') throw new ZohoTokenError(exchange.code);
     if (exchange.kind === 'network') throw new DealerListError(`get_dealers: ${exchange.reason}`);
     return parseDealerList(exchange.status, exchange.body);
+  }
+
+  /**
+   * Greaves' product list, for `pnpm crm sync-models`. A read, like
+   * get_dealers: GET, no arguments. Arrived with the live collection.
+   */
+  async listProducts(): Promise<CrmProduct[]> {
+    const exchange = await this.authorised(
+      `${this.config.apiUrl}/crm/v7/functions/${encodeURIComponent(this.config.productsFunction)}/actions/execute?auth_type=oauth`,
+      { method: 'GET' },
+    );
+    if (exchange.kind === 'token') throw new ZohoTokenError(exchange.code);
+    if (exchange.kind === 'network') throw new ProductListError(`get_products: ${exchange.reason}`);
+    return parseProductList(exchange.status, exchange.body);
   }
 
   private async execute(functionName: string, record: CrmRecord, options: CallOptions): Promise<CrmResult> {

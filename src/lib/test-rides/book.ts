@@ -2,7 +2,8 @@ import type { PrismaClient } from '@prisma/client';
 import { getModel } from '@/lib/catalog/catalog';
 import { dealerForLead, resolvePincode } from '@/lib/dealers/resolve';
 import type { DealerNotifier } from '@/lib/notifications/dealer';
-import { describeSlot, validateSlot, type SlotRejection } from './slots';
+import { leadMayProceed } from '@/lib/otp/policy';
+import { describeSlot, istToday, validateSlot, type SlotRejection } from './slots';
 
 /**
  * Booking a test ride.
@@ -24,7 +25,16 @@ export type BookingFailure =
   | { reason: 'not_verified' }
   | { reason: 'no_dealer' }
   | { reason: 'unknown_model' }
+  | { reason: 'too_many_bookings' }
   | { reason: 'bad_slot'; detail: SlotRejection };
+
+/**
+ * Upcoming rides one lead may hold at once. Each one rings a dealer and lands
+ * in the CRM, and nothing else limited them: the security audit booked six
+ * from one lead (V-11). Three covers a customer trying two models and changing
+ * their mind once; the same slot again is never counted.
+ */
+export const MAX_UPCOMING_RIDES = 3;
 
 export interface BookingSuccess {
   bookingId: string;
@@ -79,7 +89,8 @@ export async function bookTestRide(
   if (!lead) return { ok: false, reason: 'lead_not_found' };
 
   // Spec 4: OTP gates progress. Capture already happened; this is the gate.
-  if (!lead.phoneVerified) return { ok: false, reason: 'not_verified' };
+  // Open without one while OTP_REQUIRED=false; see lib/otp/policy.ts.
+  if (!leadMayProceed(lead)) return { ok: false, reason: 'not_verified' };
 
   const model = getModel(input.modelCode);
   if (!model) return { ok: false, reason: 'unknown_model' };
@@ -124,6 +135,13 @@ export async function bookTestRide(
       status: 'booked',
     },
   });
+
+  if (!existing) {
+    const upcoming = await prisma.testRide.count({
+      where: { leadId: lead.id, status: 'booked', slotDate: { gte: istToday(now) } },
+    });
+    if (upcoming >= MAX_UPCOMING_RIDES) return { ok: false, reason: 'too_many_bookings' };
+  }
 
   const booking =
     existing ??

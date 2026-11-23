@@ -8,7 +8,9 @@ import type { NearbyDealer, NearbyDealersResponse } from '@/lib/schemas/dealer';
 import { SESSION_EXPIRED_MESSAGE } from '@/lib/http/session-messages';
 import { IdentityStep, VerifiedDetails } from './IdentityStep';
 import { ScooterPicker } from './ScooterPicker';
-import { DealerStep } from './DealerStep';
+import { DealerStep, NoDealership } from './DealerStep';
+import { StepActions } from './StepFrame';
+import { goalAppHref } from './goal-app';
 import { IntentFork, type Intent } from './IntentFork';
 import { BuyBranch } from './BuyBranch';
 import { TestRideConfirmation, TestRideStep, type Booking } from './TestRideStep';
@@ -55,9 +57,27 @@ interface Props {
   resume: Resume | null;
   idleSeconds: number;
   buyEnabled: boolean;
+  /**
+   * False while the SMS sender awaits DLT registration (OTP_REQUIRED=false):
+   * step one saves the lead and carries straight on to the scooter.
+   */
+  otpRequired: boolean;
+  /**
+   * The Goal App test ride form, for a pincode no dealer here serves
+   * (GOAL_APP_URL). During the Zoho pilot that is most of India.
+   */
+  goalAppUrl: string | null;
 }
 
-export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabled }: Props) {
+export function BuyJourney({
+  prefill,
+  attribution,
+  resume,
+  idleSeconds,
+  buyEnabled,
+  otpRequired,
+  goalAppUrl,
+}: Props) {
   const [step, setStep] = useState<StepId>(resume?.step ?? 'details');
 
   const [lead, setLead] = useState<LeadCreatedResponse | null>(resume?.lead ?? null);
@@ -142,6 +162,34 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabl
     setNearby(null);
     setDealer(null);
   }, [pincode]);
+
+  /* With a Goal App hand-off, whether anyone here serves the pincode decides
+     what follows step one: the scooter, or the hand-off. So the dealer list is
+     fetched as soon as the journey opens, alongside the catalog, instead of at
+     step three. The pincode the answer is for is noted whether it came or
+     failed: a failed check falls back to the normal journey, never a spinner. */
+  const handoff = goalAppUrl ? goalAppHref(goalAppUrl, prefill.utm) : null;
+  const [nearbyChecked, setNearbyChecked] = useState<string | null>(resume?.nearby?.pincode ?? null);
+  const nearbyRequested = useRef<string | null>(resume?.nearby?.pincode ?? null);
+  useEffect(() => {
+    if (!handoff || !verified || !pincode || nearbyRequested.current === pincode) return;
+    nearbyRequested.current = pincode;
+    (async () => {
+      try {
+        const res = await fetch(`/api/dealers/nearby?pincode=${encodeURIComponent(pincode)}`);
+        if (!res.ok) throw new Error('nearby failed');
+        const data = (await res.json()) as NearbyDealersResponse;
+        // A newer pincode may have been asked about meanwhile.
+        if (nearbyRequested.current === data.pincode) setNearby(data);
+      } catch {
+        // The dealer step asks again, and says so if it fails there too.
+      } finally {
+        if (nearbyRequested.current === pincode) setNearbyChecked(pincode);
+      }
+    })();
+  }, [handoff, verified, pincode]);
+  const outsideArea = !!handoff && !!nearby && nearby.pincode === pincode && nearby.dealers.length === 0;
+  const checkingArea = !!handoff && !!pincode && nearbyChecked !== pincode;
 
   // Default the colour once a model is known, so the panel always has a scooter.
   useEffect(() => {
@@ -317,6 +365,7 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabl
           <VerifiedDetails
             name={customerName}
             lead={lead}
+            verifiedBadge={otpRequired}
             onContinue={() => go('scooter')}
             onStartOver={() => void startOver()}
           />
@@ -325,6 +374,7 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabl
             prefill={prefill}
             attribution={attribution}
             lead={lead}
+            otpRequired={otpRequired}
             initialName={customerName}
             notice={
               expiredAt
@@ -353,9 +403,22 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabl
       break;
 
     case 'scooter':
+      // No dealer here serves this pincode: book on Goal App, or try another.
+      // Before choosing a scooter, not after, for a dealer list that is empty.
+      if (outsideArea && lead) {
+        content = (
+          <div className="flex flex-col gap-7">
+            <NoDealership pincode={lead.pincode} onChangePincode={changePincode} goalAppHref={handoff} />
+            <StepActions onBack={() => go('details')}>{null}</StepActions>
+          </div>
+        );
+        break;
+      }
       content = (
         <ScooterPicker
-          models={catalog}
+          // Held on the loading state until we know the pincode is served,
+          // so the scooters never flash up before a hand-off.
+          models={checkingArea ? null : catalog}
           loadFailed={catalogFailed}
           onRetry={() => setCatalogAttempt((n) => n + 1)}
           layout={prefill.layout}
@@ -378,6 +441,7 @@ export function BuyJourney({ prefill, attribution, resume, idleSeconds, buyEnabl
           pincode={lead.pincode}
           cached={nearby}
           onLoaded={setNearby}
+          goalAppHref={handoff}
           preferredCode={dealer?.code ?? prefill.dealerCode}
           modelCode={modelCode}
           colourCode={colourCode}

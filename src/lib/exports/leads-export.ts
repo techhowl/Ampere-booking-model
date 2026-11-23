@@ -113,6 +113,25 @@ export async function exportLeads(
   });
 }
 
+/** What makes Excel, LibreOffice and Google Sheets read a cell as a formula. */
+const FORMULA_START = /^[=+\-@\t\r]/;
+/** A plain number, signed or not. "+919876543210" is a phone number, not a formula. */
+const PLAIN_NUMBER = /^[+-]?\d+(\.\d+)?$/;
+
+/**
+ * A cell the call centre's spreadsheet will show as text, never run.
+ *
+ * The name, source and UTM fields are whatever a visitor typed or put in a
+ * link. Quoting a CSV field does not stop a spreadsheet evaluating one that
+ * starts with "=" — the security audit planted a HYPERLINK formula pointing at
+ * the phone column (V-03). A leading apostrophe is the standard defence: the
+ * spreadsheet treats the rest as text. Plain numbers, phone numbers included,
+ * are left exactly as they were.
+ */
+export function neutraliseFormula(text: string): string {
+  return FORMULA_START.test(text) && !PLAIN_NUMBER.test(text) ? `'${text}` : text;
+}
+
 /** RFC 4180: quote everything, double any inner quote. Phone numbers keep their +. */
 export function toCsv(rows: LeadRow[]): string {
   const escape = (value: unknown): string => {
@@ -123,7 +142,7 @@ export function toCsv(rows: LeadRow[]): string {
           ? value
             ? 'Yes'
             : 'No'
-          : String(value);
+          : neutraliseFormula(String(value));
     return `"${text.replace(/"/g, '""')}"`;
   };
 
@@ -132,7 +151,10 @@ export function toCsv(rows: LeadRow[]): string {
   return [header, ...body].join('\r\n');
 }
 
-/** The same rows as a value grid, which is what the Sheets API takes. */
+/**
+ * The same rows as a value grid, which is what the Sheets API takes.
+ * Neutralised like the CSV; write it with valueInputOption RAW as well.
+ */
 export function toSheetValues(rows: LeadRow[]): (string | boolean)[][] {
   return [
     LEAD_COLUMNS.map((c) => c.header),
@@ -140,7 +162,7 @@ export function toSheetValues(rows: LeadRow[]): (string | boolean)[][] {
       LEAD_COLUMNS.map((c) => {
         const value = row[c.key];
         if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-        return value ?? '';
+        return neutraliseFormula(value ?? '');
       }),
     ),
   ];

@@ -10,6 +10,10 @@ import {
   withIdempotency,
 } from '@/lib/idempotency/idempotency';
 import { readSession, writeSession } from '@/lib/http/session';
+import { readJsonBody } from '@/lib/http/body';
+import { allowNewLead } from '@/lib/leads/limits';
+import { env } from '@/lib/env';
+import { queueLeadSync } from '@/lib/crm/schedule';
 
 /**
  * POST /api/leads — save name, phone and pincode, before OTP.
@@ -19,24 +23,25 @@ import { readSession, writeSession } from '@/lib/http/session';
  * call. Nothing here gates the write on verification.
  *
  * Never logs the phone number, in any branch, including the error branch.
+ *
+ * Bounded: the body by size (readJsonBody), new leads per address by
+ * allowNewLead. A browser re-saving its own lead is never limited.
  */
 
 export const dynamic = 'force-dynamic';
+/** With the OTP off, CRM sends that have come due run after the response. */
+export const maxDuration = 60;
 
 const ROUTE = 'POST /api/leads';
 
-export async function POST(request: NextRequest) {
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: 'invalid_json', message: 'Request body must be JSON' },
-      { status: 400 },
-    );
-  }
+/** Name, phone, pincode, consent and attribution: a few KB at the very most. */
+const LEAD_BODY_MAX_BYTES = 32 * 1024;
 
-  const parsed = leadIdentitySchema.safeParse(raw);
+export async function POST(request: NextRequest) {
+  const json = await readJsonBody(request, { maxBytes: LEAD_BODY_MAX_BYTES });
+  if (!json.ok) return json.response;
+
+  const parsed = leadIdentitySchema.safeParse(json.value);
   if (!parsed.success) {
     // Field-level messages so the form can put each one under its own input.
     // The phone value itself never appears here.
@@ -58,6 +63,21 @@ export async function POST(request: NextRequest) {
     userAgent: request.headers.get('user-agent'),
   };
 
+  // Only a browser without a lead creates one, so only that is counted.
+  if (!context.existingLeadId) {
+    const limit = await allowNewLead(prisma, context.ip);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        {
+          error: 'rate_limited',
+          retryAfterSeconds: limit.retryAfterSeconds,
+          message: 'We are getting a lot of requests from your network. Please try again in a few minutes.',
+        },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } },
+      );
+    }
+  }
+
   try {
     const { statusCode, body } = await withIdempotency(prisma, {
       key: request.headers.get(IDEMPOTENCY_HEADER),
@@ -77,6 +97,11 @@ export async function POST(request: NextRequest) {
     // not be the one it proved.
     const leadId = (body as { leadId?: string }).leadId;
     if (leadId) writeSession(response, { leadId, verified: false });
+
+    // With the OTP off there is no verify step to queue the CRM lead from, so
+    // it is queued here: held for the booking, sent after LEAD_HOLD_MS if
+    // none comes. A changed number is a new job (see lib/crm/jobs.ts).
+    if (leadId && !env.otpRequired) await queueLeadSync(leadId);
 
     return response;
   } catch (error) {

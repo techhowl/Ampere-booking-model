@@ -4,6 +4,8 @@ import { readSession, writeSession } from '@/lib/http/session';
 import { otpVerifySchema } from '@/lib/schemas/otp';
 import { verifyOtp } from '@/lib/otp/otp';
 import { queueLeadSync } from '@/lib/crm/schedule';
+import { readJsonBody } from '@/lib/http/body';
+import { markPhoneVerified } from '@/lib/leads/mark-verified';
 
 /**
  * POST /api/otp/verify — check the code and mark the number verified.
@@ -39,14 +41,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
-  }
+  const body = await readJsonBody(request);
+  if (!body.ok) return body.response;
 
-  const parsed = otpVerifySchema.safeParse(raw);
+  const parsed = otpVerifySchema.safeParse(body.value);
   if (!parsed.success) {
     const fields: Record<string, string> = {};
     for (const issue of parsed.error.issues) {
@@ -84,10 +82,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await prisma.lead.update({
-      where: { id: lead.id },
-      data: { phoneVerified: true },
-    });
+    // Only while the lead still carries the number the code went to. Saved
+    // again mid-verify with another number, the proof does not carry over
+    // (see markPhoneVerified).
+    if (!(await markPhoneVerified(prisma, lead.id, lead.phoneHash))) {
+      return NextResponse.json(
+        { error: 'not_found', attemptsRemaining: 0, message: MESSAGES.not_found },
+        { status: 410 },
+      );
+    }
 
     // Verified, so it may go to Greaves' CRM: with the booking, or after a
     // wait if the customer stops before one. See lib/crm/jobs.ts.

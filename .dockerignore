@@ -1,17 +1,32 @@
 # Keep the build context small and keep secrets out of it entirely.
+#
+# The build stage runs `COPY . .`, so anything not listed here lands in the
+# build cache: a root-only `.env.*` rule once let deploy/.env.production (every
+# production secret) into it. Patterns here match from the context root only,
+# so env files are excluded at every depth.
 node_modules
 .next
 .git
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
+
+# The droplet's configuration and data. Caddy reads deploy/Caddyfile through a
+# volume, and the tools service mounts deploy/data; nothing here is built in.
+deploy/
+
+# Greaves' Postman collections carry the Zoho client secret and refresh token.
+*.postman_collection.json
+*[Cc]ollection*.json
 
 # Never ship these into an image.
 assets/
 docs/
-deploy/caddy_data
-deploy/caddy_config
+security-audit/
 *.docx
+*.pdf
 ~$*
 
 # Test and tooling output

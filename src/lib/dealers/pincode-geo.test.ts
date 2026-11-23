@@ -96,9 +96,9 @@ describe('cleanPincodeLocations', () => {
     expect(where(result, '560300')).toEqual({ pincode: '560300', lat: 12.95, lng: 77.6 });
   });
 
-  it('ships corrections for the two known-bad pincodes', async () => {
+  it('ships corrections for the known-bad pincodes', async () => {
     const { CORRECTIONS } = await import('./pincode-geo');
-    expect(Object.keys(CORRECTIONS).sort()).toEqual(['560038', '700091']);
+    expect(Object.keys(CORRECTIONS).sort()).toEqual(['500064', '560038', '700091']);
   });
 });
 

@@ -31,9 +31,11 @@ Test ride booked ► crm_jobs row (ride) ─► after() sends Create Lead, then 
 - `src/lib/crm/fake.ts`: the CRM in memory, built to behave the way the sandbox did.
 - `src/lib/crm/config.ts`: environment rules (sandbox only outside production).
 
-**Unverified numbers are never sent.** The CRM has no "verified" flag, so a
-dealer would ring numbers that may be typos or someone else's. They stay in
-our own lead list (spec 5) and in the export.
+**Unverified numbers are never sent**, with the OTP on. The CRM has no
+"verified" flag, so a dealer would ring numbers that may be typos or someone
+else's. They stay in our own lead list (spec 5) and in the export. The
+exception is the pilot below: with `OTP_REQUIRED=false` every lead is sent,
+queued when step one is saved, and Greaves' call centre qualifies it.
 
 **The lead goes with the booking, not at the OTP.** The customer chooses their
 dealer, scooter, colour and help topics after the OTP, and the CRM takes those
@@ -52,6 +54,58 @@ already has a lead, and Create Lead answers "Duplicate". The new choice is on
 the test ride, correctly, but we have no way to change the lead. Only Greaves
 can: their test ride function would have to update the lead.
 
+## Live: the Zoho pilot (from 2026-11-23)
+
+Greaves sent the live Postman collection on 2026-11-23 (gitignored, like the
+sandbox ones; the values are only in the droplet's `deploy/.env.production`).
+Checked the same day with reads only (a token, `get_dealers`,
+`get_products`). **Nothing has been written to the live CRM from here**, so
+Create Lead and Create Test Ride are untested on live: watch the first real
+ones with `pnpm crm status`.
+
+- **Token**: the collection's refresh token works with our refresh grant
+  (3600 s). The authorization code in its first request is single-use and not
+  needed.
+- **Dealers**: `get_dealers` lists 427 dealers. One more row ("Virtual
+  Distributor") has no pincode and is skipped.
+- **Products**: `get_products` lists six models, with family and colours. Its
+  names are not ours ("EX+", "Magnus G Max with Intellipack"), so
+  `sync-models` matches on variant, or family plus variant, ignoring "with".
+  All six of ours match. The live org's `Vehicle_Models` module is also
+  readable (14 models); `sync-models` falls back to it where `get_products`
+  does not exist (the sandbox).
+- **Colours disagree** for two scooters. Magnus Neo is Ocean Blue, Turmeric
+  Latte and Misty Mauve on our page, but Butter Yellow, Carbon Knight and
+  Cinnamon Copper in the CRM. The CRM lists no Steel Grey for the Nexus EX+
+  Intellipack. `Colour_Preference` is sent as we show it; raised with Ampere
+  and Greaves.
+
+**The pilot.** 11 dealers in Delhi, Chennai, Pune, Bengaluru, Hyderabad and
+Bhubaneswar take leads through Zoho; every other dealer stays on Goal App
+until the big-bang release (1 December). In configuration:
+
+- `PILOT_DEALER_CRM_IDS`: the only dealers offered. Names in Greaves' email
+  differ slightly from the CRM: "Stratebiz Ventures" is "Stratabiz Ventures"
+  (given its pincode 110020 by Greaves on 23 Nov), "Nidhi EV" is "Nidhi Ev
+  World", "ROHAN AUTOMOBILES ROHAN AUTOMOBILES" is "Rohan Automobiles".
+- `GOAL_APP_URL`: /buy opens with a pincode popup (`src/app/buy/gate.ts`). A
+  customer no pilot dealer serves within 15 km is redirected straight to the
+  Goal App form, before giving a name or number, so no lead is saved here at
+  all. One who gets past it and later changes to such a pincode is offered
+  the Goal App form instead of the scooters; that lead stays in our database
+  and is **not** sent to Zoho (job outcome `outside_pilot`), unless they move
+  back to a pincode a pilot dealer serves.
+- A lead sent without a booking carries the dealer the customer chose, else
+  the nearest pilot dealer, never none: without one, the CRM would choose by
+  pincode, possibly a Goal App dealer.
+- `OTP_REQUIRED=false`: no OTP until the SMS sender clears DLT. Greaves: those
+  leads "will be marked as unqualified and will then need to be qualified by
+  Call centre". `phone_verified` stays false on them.
+
+The 11 pilot dealers cover 396 of India's 18,668 pincodes. 500064 (Falaknuma,
+Sanstech Automotive's) was recorded 37 km out in India Post's data and is now a
+hand correction in `src/lib/dealers/pincode-geo.ts`.
+
 ## The API, as observed
 
 | | |
@@ -60,7 +114,9 @@ can: their test ride function would have to update the lead.
 | Create Lead | `POST {api}/crm/v7/functions/leadcreation_for_ampere_website/actions/execute?auth_type=oauth` |
 | Create Test Ride | `POST {api}/crm/v7/functions/test_ride_creation_for_ampere_website/actions/execute?auth_type=oauth` |
 | Body | `{"data":[{…one record…}]}`, `Authorization: Bearer <token>` |
-| Sandbox API | `https://sandbox.zohoapis.in`. Production host comes with go-live approval. |
+| Sandbox API | `https://sandbox.zohoapis.in` |
+| Live API | `https://www.zohoapis.in`, same function names, same token endpoint (from 2026-11-23) |
+| Products | `GET {api}/crm/v7/functions/get_products/actions/execute?auth_type=oauth` (live collection) |
 
 **HTTP 200 does not mean success.** Every business answer is a 200, with the
 real result as a JSON *string* in `details.output`:
@@ -124,8 +180,8 @@ raw response text. The sandbox accepts string ids.
 | `Zoho_CRM_Lead_ID` | the CRM lead id we hold, else empty |
 
 Ids differ between sandbox and production, so they are **data, not code**:
-`crm_vehicle_models` (filled by `pnpm crm sync-models`, which reads the CRM's
-own `Vehicle_Models`) and `dealers` (filled by `pnpm crm sync-dealers`, below;
+`crm_vehicle_models` (filled by `pnpm crm sync-models`, which reads Greaves'
+`get_products`, else the CRM's own `Vehicle_Models`) and `dealers` (filled by `pnpm crm sync-dealers`, below;
 `pnpm crm link-dealer` for one-offs). The seed fills both with **sandbox** ids.
 
 ## The dealer master
@@ -207,10 +263,10 @@ CRM_PROVIDER=zoho
 ZOHO_API_URL=https://sandbox.zohoapis.in      # production host only with APP_ENV=production
 ZOHO_CLIENT_ID=…  ZOHO_CLIENT_SECRET=…  ZOHO_REFRESH_TOKEN=…
 
-pnpm crm status          # queued / retrying / dead jobs, unmapped models and dealers
+pnpm crm status          # queued / retrying / dead jobs, unmapped models and dealers, pilot dealers
 pnpm crm send            # send everything due now
 pnpm crm requeue [id…]   # dead jobs get a fresh run, once the cause is fixed
-pnpm crm sync-models     # read vehicle ids from the CRM
+pnpm crm sync-models     # read vehicle ids from the CRM (get_products), and colour mismatches
 pnpm crm sync-dealers    # make our dealers match the CRM's dealer master (--dry-run first)
 pnpm crm link-dealer AMP-S-001 1456765000001717131
 pnpm crm smoke           # sandbox only: one real lead + ride + look-up

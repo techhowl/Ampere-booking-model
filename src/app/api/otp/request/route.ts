@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
 import { clientIp } from '@/lib/http/request';
+import { readJsonBody } from '@/lib/http/body';
 import { decryptPhone } from '@/lib/crypto/phone';
 import { SESSION_COOKIE, parseSession } from '@/lib/crypto/session';
 import { otpRequestSchema, type OtpRequestResponse } from '@/lib/schemas/otp';
@@ -51,14 +52,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let raw: unknown = {};
-  try {
-    raw = await request.json();
-  } catch {
-    // An empty body is fine — everything in it is optional.
-  }
+  // An empty body is fine — everything in it is optional. It must still be
+  // sent as JSON, from our own page: see readJsonBody.
+  const body = await readJsonBody(request, { allowEmpty: true });
+  if (!body.ok) return body.response;
 
-  const parsed = otpRequestSchema.safeParse(raw ?? {});
+  const parsed = otpRequestSchema.safeParse(body.value ?? {});
   if (!parsed.success) {
     return NextResponse.json({ error: 'validation_failed' }, { status: 422 });
   }

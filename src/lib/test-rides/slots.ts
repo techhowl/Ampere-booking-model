@@ -84,6 +84,11 @@ function dateOnly(moment: Pick<IstMoment, 'year' | 'month' | 'day'>): Date {
   return new Date(Date.UTC(moment.year, moment.month, moment.day));
 }
 
+/** Today's date in IST, stored the way slot_date is: UTC midnight. */
+export function istToday(now: Date = new Date()): Date {
+  return dateOnly(toIst(now));
+}
+
 /** "2026-10-05" — the wire format for a slot date. */
 export function formatSlotDate(date: Date): string {
   return date.toISOString().slice(0, 10);

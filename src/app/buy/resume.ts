@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { isActive, type LeadSession } from '@/lib/crypto/session';
+import { env } from '@/lib/env';
 import { resolvePincode } from '@/lib/dealers/resolve';
 import { findNearbyDealers } from '@/lib/dealers/nearby';
 import { catalogForPincode, type ModelAvailability } from '@/lib/catalog/availability';
@@ -71,8 +72,9 @@ export async function loadResume(
   };
 
   // Both halves: this browser proved the number, and the lead still carries
-  // the number it proved.
-  if (!(session.verified && lead.phoneVerified)) {
+  // the number it proved. With the OTP off there is nothing to prove; a live
+  // session is the journey.
+  if (env.otpRequired && !(session.verified && lead.phoneVerified)) {
     return {
       ...base,
       verified: false,

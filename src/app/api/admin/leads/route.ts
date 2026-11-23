@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
-import { isAdminAuthorised } from '@/lib/admin/auth';
+import { ADMIN_ATTEMPTS_PER_HOUR, adminIpAllowed, isAdminAuthorised } from '@/lib/admin/auth';
 import { exportLeads, toCsv, type LeadSegment } from '@/lib/exports/leads-export';
+import { clientIp } from '@/lib/http/request';
+import { consume } from '@/lib/rate-limit/rate-limit';
 
 /**
  * GET /api/admin/leads?segment=verified|unverified|all&format=json|csv
@@ -11,12 +13,36 @@ import { exportLeads, toCsv, type LeadSegment } from '@/lib/exports/leads-export
  * This response contains full phone numbers. It is behind the admin password,
  * never cached, and every call is logged — see the note in leads-export.ts
  * about why a Google Sheet mirror of this needs Legal's sign-off.
+ *
+ * One request is the whole customer list, so the password is not the only
+ * thing in the way (security audit V-06): ADMIN_ALLOWED_IPS, when set, limits
+ * who may ask at all, and each address gets ADMIN_ATTEMPTS_PER_HOUR tries.
  */
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const ip = clientIp(request);
+
+  if (!adminIpAllowed(ip)) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
+
+  // Counted before the password is checked, so guessing costs attempts.
+  if (ip) {
+    const decision = await consume(prisma, 'admin', [
+      { kind: 'ip', subject: ip, max: ADMIN_ATTEMPTS_PER_HOUR, windowSeconds: 3600 },
+    ]);
+    if (!decision.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfterSeconds: decision.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(decision.retryAfterSeconds) } },
+      );
+    }
+  }
+
   if (!isAdminAuthorised(request.headers.get('authorization'))) {
+    console.warn('[admin] refused lead export', { ip });
     return NextResponse.json(
       { error: 'unauthorised', message: 'Admin credentials required.' },
       { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } },
@@ -38,7 +64,8 @@ export async function GET(request: NextRequest) {
     since: since && !Number.isNaN(since.getTime()) ? since : undefined,
   });
 
-  console.info('[admin] lead export', { segment, format, count: rows.length });
+  // The credential is shared, so the address is the only clue to who asked.
+  console.info('[admin] lead export', { segment, format, count: rows.length, ip });
 
   if (format === 'csv') {
     const stamp = new Date().toISOString().slice(0, 10);

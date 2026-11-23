@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { offeredDealerSql, offeredDealerWhere } from './offered';
 import { resolvePincode, type ResolvedDealer } from './resolve';
 
 /**
@@ -115,7 +116,7 @@ function closestDealers(prisma: PrismaClient, lat: number, lng: number) {
           power(sin(radians(d.lng - ${lng}) / 2), 2)
         ))) AS distance_km
       FROM dealers d
-      WHERE d.active AND d.lat IS NOT NULL AND d.lng IS NOT NULL
+      WHERE ${offeredDealerSql('d')} AND d.lat IS NOT NULL AND d.lng IS NOT NULL
     ) ranked
     ORDER BY distance_km, dealer_code
     LIMIT ${MAX_DEALER_CHOICES}
@@ -149,7 +150,7 @@ async function regionDealers(prisma: PrismaClient, pincode: string): Promise<Nea
 
   const others = await prisma.dealer.findMany({
     where: {
-      active: true,
+      ...offeredDealerWhere(),
       // Serves at least one pincode in the same sorting district.
       pincodeMap: { some: { pincode: { startsWith: district } } },
       ...(own ? { dealerCode: { not: own.code } } : {}),

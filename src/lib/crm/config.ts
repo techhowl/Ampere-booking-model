@@ -16,7 +16,7 @@
 export interface ZohoConfig {
   /** https://accounts.zoho.in — Zoho's India data centre. */
   accountsUrl: string;
-  /** https://sandbox.zohoapis.in, or the production host after go-live. */
+  /** https://sandbox.zohoapis.in, or the live https://www.zohoapis.in (from 2026-11-23). */
   apiUrl: string;
   clientId: string;
   clientSecret: string;
@@ -25,6 +25,8 @@ export interface ZohoConfig {
   testRideFunction: string;
   /** Greaves' dealer master: every active dealer, for `pnpm crm sync-dealers`. */
   dealersFunction: string;
+  /** Greaves' vehicle models with their ids, for `pnpm crm sync-models`. */
+  productsFunction: string;
   /** Per request. The sandbox has taken 16 seconds to answer. */
   timeoutMs: number;
 }
@@ -39,6 +41,7 @@ const DEFAULT_ACCOUNTS_URL = 'https://accounts.zoho.in';
 const DEFAULT_LEAD_FUNCTION = 'leadcreation_for_ampere_website';
 const DEFAULT_TEST_RIDE_FUNCTION = 'test_ride_creation_for_ampere_website';
 const DEFAULT_DEALERS_FUNCTION = 'get_dealers';
+const DEFAULT_PRODUCTS_FUNCTION = 'get_products';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 function required(source: Source, name: string): string {
@@ -83,6 +86,7 @@ export function crmSettings(source: Source = process.env): CrmSettings {
     leadFunction: source.ZOHO_LEAD_FUNCTION?.trim() || DEFAULT_LEAD_FUNCTION,
     testRideFunction: source.ZOHO_TEST_RIDE_FUNCTION?.trim() || DEFAULT_TEST_RIDE_FUNCTION,
     dealersFunction: source.ZOHO_DEALERS_FUNCTION?.trim() || DEFAULT_DEALERS_FUNCTION,
+    productsFunction: source.ZOHO_PRODUCTS_FUNCTION?.trim() || DEFAULT_PRODUCTS_FUNCTION,
     timeoutMs: Number.isFinite(timeout) && timeout >= 1000 ? timeout : DEFAULT_TIMEOUT_MS,
   };
 

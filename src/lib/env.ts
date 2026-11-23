@@ -120,4 +120,68 @@ export const env = {
   get turnstileSecret(): string | null {
     return process.env.TURNSTILE_SECRET || null;
   },
+
+  /**
+   * Whether the journey past step one waits for an OTP. On unless set to
+   * exactly "false".
+   *
+   * Off while Ampere's SMS sender is still in DLT registration and no code can
+   * reach a real handset (Greaves, 2026-11: "we will disable OTP verification
+   * for the Zoho Pilot Dealers. Those leads will be marked as unqualified and
+   * will then need to be qualified by Call centre"). Off means: the lead is
+   * still saved with phone_verified = false, the customer carries straight on
+   * to the scooter, and the lead goes to the CRM unverified. Buy Now still
+   * needs a verified number, whatever this says: see create-order.ts.
+   */
+  get otpRequired(): boolean {
+    return process.env.OTP_REQUIRED !== 'false';
+  },
+
+  /**
+   * The Zoho pilot: Greaves CRM account ids of the only dealers the page may
+   * offer, comma separated. Unset or empty means every active dealer.
+   *
+   * Ids, not names or our dealer codes, because they are what the CRM's dealer
+   * master and `pnpm crm sync-dealers` key on. They differ between sandbox and
+   * production, so they live in each deployment's environment, never in code.
+   */
+  get pilotDealerCrmIds(): string[] | null {
+    return parsePilotDealerIds(process.env.PILOT_DEALER_CRM_IDS);
+  },
+
+  /**
+   * Where a customer goes when no dealer we offer is near their pincode: the
+   * Goal App test ride form, which serves every dealer outside the pilot.
+   * Unset means no hand-off; the dealer step's "no dealership" state instead.
+   */
+  get goalAppUrl(): string | null {
+    return parseGoalAppUrl(process.env.GOAL_APP_URL);
+  },
 } as const;
+
+/** Throws on anything that is not a list of CRM ids, so a typo stops the app at startup. */
+export function parsePilotDealerIds(value: string | undefined): string[] | null {
+  const ids = (value ?? '')
+    .split(/[\s,]+/)
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (ids.length === 0) return null;
+  const bad = ids.filter((id) => !/^\d{10,30}$/.test(id));
+  if (bad.length > 0) {
+    throw new Error(`PILOT_DEALER_CRM_IDS must be CRM account ids (digits), comma separated. Not: ${bad.join(', ')}`);
+  }
+  return [...new Set(ids)];
+}
+
+export function parseGoalAppUrl(value: string | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('GOAL_APP_URL is not a URL');
+  }
+  if (url.protocol !== 'https:') throw new Error('GOAL_APP_URL must be https');
+  return url.toString();
+}

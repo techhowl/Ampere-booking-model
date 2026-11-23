@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { env } from '@/lib/env';
 import { SESSION_EXPIRED_MESSAGE } from './session-messages';
 import {
   SESSION_COOKIE,
@@ -54,7 +55,9 @@ export function requireJourney(request: NextRequest): JourneyGate {
       ),
     };
   }
-  if (!session.verified) {
+  // With the OTP switched off (OTP_REQUIRED=false) holding the lead's session
+  // is enough. The cookie still says honestly whether a code was entered.
+  if (!session.verified && env.otpRequired) {
     return {
       ok: false,
       response: NextResponse.json(

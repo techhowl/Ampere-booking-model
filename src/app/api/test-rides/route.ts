@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireJourney, writeSession } from '@/lib/http/session';
+import { readJsonBody } from '@/lib/http/body';
 import { testRideSchema } from '@/lib/schemas/test-ride';
 import { bookTestRide } from '@/lib/test-rides/book';
 import { offeredDays } from '@/lib/test-rides/slots';
@@ -37,6 +38,8 @@ const MESSAGES: Record<string, string> = {
   too_late: 'That slot has already started. Please pick another.',
   unknown_window: 'Please pick one of the available time slots.',
   bad_date: 'Please pick a valid date.',
+  too_many_bookings:
+    'You already have test rides booked. Your dealer will call to confirm and can move one to another time.',
 };
 
 export async function GET() {
@@ -52,14 +55,10 @@ export async function POST(request: NextRequest) {
   if (!gate.ok) return gate.response;
   const { session } = gate;
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
-  }
+  const json = await readJsonBody(request);
+  if (!json.ok) return json.response;
 
-  const parsed = testRideSchema.safeParse(raw);
+  const parsed = testRideSchema.safeParse(json.value);
   if (!parsed.success) {
     const fields: Record<string, string> = {};
     for (const issue of parsed.error.issues) {

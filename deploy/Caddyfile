@@ -7,6 +7,13 @@
 {$SITE_HOST} {
 	encode zstd gzip
 
+	# No request here is legitimately large: the biggest is a few KB of lead
+	# details or a Juspay webhook. The app enforces tighter per-route limits;
+	# this stops oversized bodies before they reach Node (security audit V-05).
+	request_body {
+		max_size 1MB
+	}
+
 	# The droplet sits behind nothing else, so Caddy is the first hop and its
 	# view of the client IP is the real one. The app reads these for rate
 	# limiting and for the consent record.

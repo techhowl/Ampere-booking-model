@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { getModel } from '@/lib/catalog/catalog';
 import { findOfferedDealer, type NearbyDealer } from '@/lib/dealers/nearby';
+import { leadMayProceed } from '@/lib/otp/policy';
 
 /**
  * The customer picks their dealer.
@@ -31,7 +32,7 @@ export async function chooseDealer(
   if (!lead) return { ok: false, reason: 'lead_not_found' };
 
   // The dealer step sits behind the OTP, like everything after step one.
-  if (!lead.phoneVerified) return { ok: false, reason: 'not_verified' };
+  if (!leadMayProceed(lead)) return { ok: false, reason: 'not_verified' };
 
   const dealer = await findOfferedDealer(prisma, lead.pincode, dealerCode);
   if (!dealer) return { ok: false, reason: 'not_offered' };

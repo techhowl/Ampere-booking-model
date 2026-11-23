@@ -67,6 +67,29 @@ services:
       retries: 3
       start_period: 30s
 
+  # One-off commands against the production database: seed, pincode import,
+  # `pnpm crm sync-models / sync-dealers / status`. The app image is a trimmed
+  # standalone server with no tsx and no scripts, so these run in the build
+  # stage instead, which has both. Never started by `up`; only by `run`:
+  #
+  #   docker compose -f docker-compose.prod.yml --env-file deploy/.env.production \
+  #     run --rm tools pnpm crm status
+  tools:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    profiles: ['tools']
+    restart: 'no'
+    env_file:
+      - deploy/.env.production
+    volumes:
+      # The pincode locations for `pnpm db:import-pincodes`. Read-only.
+      - ./deploy/data:/app/deploy/data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

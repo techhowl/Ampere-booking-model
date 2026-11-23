@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db';
+import { env } from '@/lib/env';
 import { getModel } from '@/lib/catalog/catalog';
-import { FakeJuspayClient, type JuspayClient } from './juspay';
+import { FakeJuspayClient, UnconfiguredJuspayClient, type JuspayClient } from './juspay';
 import { RealJuspayClient, type JuspayConfig, type OrderContext } from './real-client';
 
 /**
@@ -11,11 +12,23 @@ import { RealJuspayClient, type JuspayConfig, type OrderContext } from './real-c
  * already redirects the customer to whatever URL the client returns, and that
  * URL becomes Juspay's hosted page.
  *
- * Until then the fake drives development, the test suite and the demo —
- * including the full status-resolution and reconciliation path.
+ * Until then the fake drives development, the test suite and the UAT demo —
+ * including the full status-resolution and reconciliation path. Never a live
+ * deployment: there the fake would confirm payments nobody made, so it gets
+ * UnconfiguredJuspayClient instead (security audit V-01).
  */
 
 let client: JuspayClient | null = null;
+
+/**
+ * Whether the fake and its stand-in checkout may run here.
+ *
+ * Not in a live deployment: a production build with APP_ENV production, or
+ * unset (env.appEnv fails closed). `next dev`, the test runner and UAT may.
+ */
+export function fakePaymentsAllowed(): boolean {
+  return !(env.isProduction && env.appEnv === 'production');
+}
 
 function required(name: string): string {
   const value = process.env[name];
@@ -96,7 +109,7 @@ export function getJuspayClient(): JuspayClient {
     return client;
   }
 
-  client = new FakeJuspayClient();
+  client = fakePaymentsAllowed() ? new FakeJuspayClient() : new UnconfiguredJuspayClient();
   return client;
 }
 

@@ -36,6 +36,7 @@ describe('crmSettings', () => {
         leadFunction: 'leadcreation_for_ampere_website',
         testRideFunction: 'test_ride_creation_for_ampere_website',
         dealersFunction: 'get_dealers',
+        productsFunction: 'get_products',
         timeoutMs: 30_000,
       },
     });

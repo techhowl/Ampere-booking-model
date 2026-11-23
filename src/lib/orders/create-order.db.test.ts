@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import { resetDatabase } from '../../../test/reset-db';
 
@@ -377,5 +377,86 @@ describe('the webhook', () => {
     });
     expect(stock.unitsTotal).toBe(4);
     expect(await prisma.paymentEvent.count()).toBe(3);
+  });
+
+  describe('an unsigned payload (audit V-05)', () => {
+    const unsigned = (orderId: string, over: Record<string, unknown> = {}) => ({
+      orderId,
+      eventType: 'ORDER_SUCCEEDED',
+      signatureValid: false,
+      payload: { forged: true, junk: 'x'.repeat(10_000) },
+      status: 'CHARGED',
+      rawBytes: 10_050,
+      ...over,
+    });
+
+    it('keeps a short summary, never the body', async () => {
+      const created = await createOrder(prisma, juspay, order(), RETURN_URL);
+      await recordWebhook(prisma, unsigned(created.orderId));
+
+      const [event] = await prisma.paymentEvent.findMany({ where: { orderId: created.orderId } });
+      expect(event?.signatureValid).toBe(false);
+      expect(event?.rawPayload).toEqual({ unverified: true, status: 'CHARGED', bytes: 10_050 });
+    });
+
+    it('stores nothing for an order we do not have', async () => {
+      await recordWebhook(prisma, unsigned('AMP-MADE-UP'));
+      expect(await prisma.paymentEvent.count()).toBe(0);
+    });
+
+    it("stops keeping one sender's unsigned payloads after the hourly limit", async () => {
+      const created = await createOrder(prisma, juspay, order(), RETURN_URL);
+      for (let i = 0; i < 35; i++) {
+        await recordWebhook(prisma, unsigned(created.orderId, { ip: '203.0.113.9' }));
+      }
+      expect(await prisma.paymentEvent.count()).toBe(30);
+      const row = await prisma.order.findUniqueOrThrow({ where: { orderId: created.orderId } });
+      expect(row.status).toBe('initiated');
+    });
+  });
+
+  describe("Juspay's wider status vocabulary (audit V-10)", () => {
+    const signed = (orderId: string, status: string, amountPaid?: number) => ({
+      orderId,
+      eventType: 'ORDER_EVENT',
+      signatureValid: true,
+      payload: {},
+      status,
+      amountPaid,
+    });
+
+    it('fails the order and frees the unit on AUTHENTICATION_FAILED', async () => {
+      const created = await createOrder(prisma, juspay, order(), RETURN_URL);
+      expect(await recordWebhook(prisma, signed(created.orderId, 'AUTHENTICATION_FAILED'))).toBe('failed');
+
+      const stock = await prisma.inventory.findUniqueOrThrow({
+        where: { modelCode_dealerCode: { modelCode: MODEL, dealerCode: DEALER } },
+      });
+      expect(stock.unitsReserved).toBe(0);
+    });
+
+    it('reads a lower-case status the same as upper case', async () => {
+      const created = await createOrder(prisma, juspay, order(), RETURN_URL);
+      expect(await recordWebhook(prisma, signed(created.orderId, 'charged', 5000))).toBe('paid');
+    });
+
+    it('holds a payment for less than was charged as pending, and keeps the unit held', async () => {
+      const created = await createOrder(prisma, juspay, order(), RETURN_URL);
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(await recordWebhook(prisma, signed(created.orderId, 'CHARGED', 1))).toBe('pending');
+      spy.mockRestore();
+
+      const row = await prisma.order.findUniqueOrThrow({ where: { orderId: created.orderId } });
+      expect(row.status).toBe('pending');
+      const stock = await prisma.inventory.findUniqueOrThrow({
+        where: { modelCode_dealerCode: { modelCode: MODEL, dealerCode: DEALER } },
+      });
+      expect(stock.unitsTotal).toBe(5);
+    });
+
+    it('marks paid when the amount matches what was charged', async () => {
+      const created = await createOrder(prisma, juspay, order(), RETURN_URL);
+      expect(await recordWebhook(prisma, signed(created.orderId, 'CHARGED', 5000))).toBe('paid');
+    });
   });
 });

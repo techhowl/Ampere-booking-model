@@ -2,12 +2,16 @@ import 'dotenv/config';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { cleanPincodeLocations, usablePoint, type Office } from '../src/lib/dealers/pincode-geo';
+import { CORRECTIONS, cleanPincodeLocations, usablePoint, type Office } from '../src/lib/dealers/pincode-geo';
 
 /**
  * Load pincode coordinates into pincode_geo.
  *
  *   pnpm db:import-pincodes path/to/pincodes.csv
+ *   pnpm db:import-pincodes deploy/data/pincode-geo.csv --as-is
+ *
+ * The second form loads our own export (one cleaned location per pincode, as
+ * the local database holds them) without cleaning it a second time.
  *
  * Built for India Post's "All India Pincode Directory" with latitude and
  * longitude (data.gov.in, Government Open Data Licence — India; attribution:
@@ -55,9 +59,11 @@ function splitCsvLine(line: string): string[] {
 }
 
 async function main(): Promise<void> {
-  const file = process.argv[2];
+  const args = process.argv.slice(2);
+  const asIs = args.includes('--as-is');
+  const file = args.find((a) => !a.startsWith('--'));
   if (!file) {
-    console.error('Usage: pnpm db:import-pincodes <path-to-csv>');
+    console.error('Usage: pnpm db:import-pincodes <path-to-csv> [--as-is]');
     process.exit(1);
   }
 
@@ -101,7 +107,21 @@ async function main(): Promise<void> {
     offices.push({ pincode, lat: point[0], lng: point[1], headOffice: type === 'HO' });
   }
 
-  const { locations, doubtful, officesIgnored } = cleanPincodeLocations(offices);
+  // --as-is: the file is already one checked location per pincode — our own
+  // export, deploy/data/pincode-geo.csv. Cleaning it again would judge each
+  // pincode against district centres rebuilt from cleaned points, and wrongly
+  // drop about 200 of them (Faridabad and Gurgaon among them). Hand
+  // corrections still win.
+  const { locations, doubtful, officesIgnored } = asIs
+    ? {
+        locations: offices.map((o) => {
+          const fixed = CORRECTIONS[o.pincode];
+          return { pincode: o.pincode, lat: fixed?.lat ?? o.lat, lng: fixed?.lng ?? o.lng };
+        }),
+        doubtful: [] as string[],
+        officesIgnored: 0,
+      }
+    : cleanPincodeLocations(offices);
 
   const prisma = new PrismaClient();
   try {

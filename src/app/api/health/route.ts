@@ -22,7 +22,12 @@ export async function GET() {
     await prisma.$queryRaw`SELECT 1`;
     database = 'up';
   } catch (error) {
-    console.error('[health] database check failed', error);
+    // Name and message only: a driver error object can carry its connection
+    // details along with the stack.
+    console.error('[health] database check failed', {
+      name: error instanceof Error ? error.name : 'unknown',
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 
   const healthy = database === 'up';

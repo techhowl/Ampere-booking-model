@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { randomBytes } from 'node:crypto';
+import { beforeAll, describe, expect, it } from 'vitest';
 import {
   FakeJuspayClient,
+  UnconfiguredJuspayClient,
+  fakeWebhookAuthorization,
   nextStatus,
   resolveOnReturn,
   type StoredOrder,
 } from './juspay';
-import { RealJuspayClient } from './real-client';
+import { RealJuspayClient, normaliseStatus } from './real-client';
+
+beforeAll(() => {
+  // The fake's webhook credential is keyed by the session secret.
+  process.env.SESSION_SECRET = randomBytes(32).toString('base64');
+});
 
 /**
  * These five cases are the ones that hurt in production. Each is cheap to
@@ -88,10 +96,62 @@ describe('5. out-of-order webhook', () => {
 });
 
 describe('webhook authenticity', () => {
+  const body = (orderId: string) => JSON.stringify({ content: { order: { order_id: orderId, status: 'CHARGED' } } });
+
   it('rejects an unauthenticated payload', () => {
     const client = new FakeJuspayClient();
-    expect(client.verifyWebhook('{}', 'nonsense')).toBe(false);
-    expect(client.verifyWebhook('{}', 'valid-signature')).toBe(true);
+    expect(client.verifyWebhook(body('AMP-TEST-1'), 'nonsense')).toBe(false);
+    expect(client.verifyWebhook(body('AMP-TEST-1'), '')).toBe(false);
+  });
+
+  it('no longer accepts the old constant credential (audit V-01)', () => {
+    const client = new FakeJuspayClient();
+    expect(client.verifyWebhook(body('AMP-TEST-1'), 'valid-signature')).toBe(false);
+  });
+
+  it("accepts the stand-in checkout's credential for its own order", () => {
+    const client = new FakeJuspayClient();
+    const auth = fakeWebhookAuthorization('AMP-TEST-1');
+    expect(client.verifyWebhook(body('AMP-TEST-1'), auth)).toBe(true);
+    // Either envelope the route accepts.
+    expect(client.verifyWebhook(JSON.stringify({ order_id: 'AMP-TEST-1', status: 'CHARGED' }), auth)).toBe(true);
+  });
+
+  it("refuses one order's credential on another order", () => {
+    const client = new FakeJuspayClient();
+    expect(client.verifyWebhook(body('AMP-TEST-2'), fakeWebhookAuthorization('AMP-TEST-1'))).toBe(false);
+  });
+
+  it('refuses a body it cannot read', () => {
+    const client = new FakeJuspayClient();
+    expect(client.verifyWebhook('not json', fakeWebhookAuthorization('AMP-TEST-1'))).toBe(false);
+  });
+});
+
+describe('UnconfiguredJuspayClient (live deployment without Juspay)', () => {
+  const client = new UnconfiguredJuspayClient();
+
+  it('verifies no webhook, whatever it carries', () => {
+    expect(client.verifyWebhook()).toBe(false);
+  });
+
+  it('starts no payment', async () => {
+    await expect(client.createOrder()).rejects.toThrow(/not configured/);
+  });
+
+  it('resolves a return as unknown, never paid', async () => {
+    const result = await resolveOnReturn(client, order());
+    expect(result).toEqual({ status: 'unknown', source: 'none' });
+  });
+});
+
+describe('normaliseStatus (webhook and status API share it)', () => {
+  it('maps the statuses Juspay really sends', () => {
+    expect(normaliseStatus('CHARGED')).toBe('CHARGED');
+    expect(normaliseStatus('charged')).toBe('CHARGED');
+    expect(normaliseStatus('AUTHENTICATION_FAILED')).toBe('AUTHORIZATION_FAILED');
+    expect(normaliseStatus('AUTHORIZED')).toBe('PENDING');
+    expect(normaliseStatus('SOMETHING_NEW')).toBe('NEW');
   });
 });
 

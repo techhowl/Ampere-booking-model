@@ -421,8 +421,12 @@ export class RealJuspayClient implements JuspayClient {
  * Both map to PENDING here rather than CHARGED, deliberately. Telling a
  * customer their payment succeeded when it has only been authorised is exactly
  * the error spec 6 calls the worst available to us.
+ *
+ * Exported so the webhook path uses the same vocabulary as the status API.
+ * Before, it handed Juspay's raw status straight to mapJuspayStatus, which
+ * knows four values, so AUTHENTICATION_FAILED and friends did nothing.
  */
-function normaliseStatus(raw: string): JuspayStatus {
+export function normaliseStatus(raw: string): JuspayStatus {
   switch (raw.toUpperCase()) {
     /* Money has moved. */
     case 'CHARGED': // 21

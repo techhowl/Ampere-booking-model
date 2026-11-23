@@ -36,6 +36,8 @@ interface Props {
    * the lead to it and resolves to null, or to a message to show.
    */
   onChangePincode: (pincode: string) => Promise<string | null>;
+  /** The Goal App hand-off for a pincode no dealer here serves. See NoDealership. */
+  goalAppHref: string | null;
 }
 
 const NETWORK_ERROR = 'We couldn’t process your request. Please try again in a moment.';
@@ -51,6 +53,7 @@ export function DealerStep({
   onExpired,
   onBack,
   onChangePincode,
+  goalAppHref,
 }: Props) {
   const [data, setData] = useState<NearbyDealersResponse | null>(
     cached?.pincode === pincode ? cached : null,
@@ -198,7 +201,9 @@ export function DealerStep({
         </div>
       )}
 
-      {data && dealers.length === 0 && <NoDealership pincode={pincode} onChangePincode={onChangePincode} />}
+      {data && dealers.length === 0 && (
+        <NoDealership pincode={pincode} onChangePincode={onChangePincode} goalAppHref={goalAppHref} />
+      )}
 
       {error && <Notice tone="error">{error}</Notice>}
 
@@ -214,13 +219,22 @@ export function DealerStep({
 /**
  * No dealership within reach of this pincode. The customer can try another
  * — where they work, say — without leaving the step.
+ *
+ * During the Zoho pilot most of India is served by dealers on Goal App, not by
+ * this page. With GOAL_APP_URL set, the first thing offered is to book there;
+ * another pincode is the second. Also shown in place of the scooter step,
+ * straight after step one, so nobody picks a scooter for a dealer list that
+ * will be empty.
  */
-function NoDealership({
+export function NoDealership({
   pincode,
   onChangePincode,
+  goalAppHref,
 }: {
   pincode: string;
   onChangePincode: (pincode: string) => Promise<string | null>;
+  /** Where to book instead. Null shows only the change of pincode. */
+  goalAppHref: string | null;
 }) {
   const inputId = useId();
   const [value, setValue] = useState('');
@@ -243,14 +257,38 @@ function NoDealership({
       <span className="flex size-12 items-center justify-center rounded-full bg-white text-amp-ink shadow-sm">
         <StoreIcon className="size-6" />
       </span>
-      <p className="mt-4 text-[16px] font-semibold text-amp-ink">
-        No dealerships available in your area right now
-      </p>
-      <p className="mt-1.5 max-w-[38ch] text-[14px] leading-relaxed text-amp-muted">
-        Try another location or pincode to discover an Ampere dealership near you.
-      </p>
+      {goalAppHref ? (
+        <>
+          <p className="mt-4 text-[16px] font-semibold text-amp-ink">
+            Book your test ride with a dealer near {pincode}
+          </p>
+          <p className="mt-1.5 max-w-[40ch] text-[14px] leading-relaxed text-amp-muted">
+            Test rides for your area are booked on our test ride page. It takes a minute.
+          </p>
+          <a
+            href={goalAppHref}
+            className="mt-5 inline-flex min-h-12 w-full max-w-sm items-center justify-center rounded-xl bg-amp-cta px-5 text-[15px] font-semibold text-white transition-colors hover:bg-amp-cta-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amp-accent"
+          >
+            Book a test ride
+          </a>
+          <p className="mt-6 text-[13px] text-amp-muted">Or try another pincode, such as where you work:</p>
+        </>
+      ) : (
+        <>
+          <p className="mt-4 text-[16px] font-semibold text-amp-ink">
+            No dealerships available in your area right now
+          </p>
+          <p className="mt-1.5 max-w-[38ch] text-[14px] leading-relaxed text-amp-muted">
+            Try another location or pincode to discover an Ampere dealership near you.
+          </p>
+        </>
+      )}
 
-      <form onSubmit={submit} noValidate className="mt-5 flex w-full max-w-sm flex-col gap-2 sm:flex-row">
+      <form
+        onSubmit={submit}
+        noValidate
+        className={`${goalAppHref ? 'mt-2' : 'mt-5'} flex w-full max-w-sm flex-col gap-2 sm:flex-row`}
+      >
         <label htmlFor={inputId} className="sr-only">
           Pincode
         </label>
@@ -270,7 +308,13 @@ function NoDealership({
         <button
           type="submit"
           disabled={busy}
-          className="inline-flex min-h-12 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-amp-cta px-5 text-[14px] font-semibold text-white transition-colors hover:bg-amp-cta-hover disabled:cursor-wait disabled:opacity-70"
+          className={[
+            'inline-flex min-h-12 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl px-5 text-[14px] font-semibold transition-colors disabled:cursor-wait disabled:opacity-70',
+            // Second to the Goal App button when there is one; the only way on when not.
+            goalAppHref
+              ? 'border border-amp-ink/25 bg-white text-amp-ink hover:border-amp-ink/50'
+              : 'bg-amp-cta text-white hover:bg-amp-cta-hover',
+          ].join(' ')}
         >
           <PinIcon className="size-4" />
           {busy ? 'Processing your request…' : 'Change Location'}

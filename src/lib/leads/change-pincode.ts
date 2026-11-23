@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { resolvePincode } from '@/lib/dealers/resolve';
+import { leadMayProceed } from '@/lib/otp/policy';
 import type { LeadCreatedResponse } from '@/lib/schemas/lead';
 import { toLeadResponse } from './save-lead';
 
@@ -25,7 +26,7 @@ export async function changePincode(
   if (!lead) return { ok: false, reason: 'lead_not_found' };
 
   // The dealer step sits behind the OTP, like everything after step one.
-  if (!lead.phoneVerified) return { ok: false, reason: 'not_verified' };
+  if (!leadMayProceed(lead)) return { ok: false, reason: 'not_verified' };
 
   const location = await resolvePincode(prisma, pincode);
   await prisma.lead.update({

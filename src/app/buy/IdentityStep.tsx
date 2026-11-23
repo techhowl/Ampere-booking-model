@@ -27,12 +27,18 @@ import type { Prefill } from './prefill';
  * when their session timed out. The lead is already saved, so the fields show
  * what we hold (the number only by its last four digits; the browser is never
  * given the rest) and the button sends a fresh code.
+ *
+ * With the OTP switched off (OTP_REQUIRED=false, until the SMS sender clears
+ * DLT) there is no code: Continue saves the lead and the journey goes on. A
+ * timed-out customer types their number again instead, and the same lead is
+ * patched, since the browser still holds its id.
  */
 
 interface Props {
   prefill: Prefill;
   attribution: Record<string, unknown>;
   lead: LeadCreatedResponse | null;
+  otpRequired: boolean;
   /** The name on a lead already saved, when picking it back up. */
   initialName?: string;
   /** Why they are here again, shown above the form. */
@@ -58,6 +64,7 @@ export function IdentityStep({
   prefill,
   attribution,
   lead,
+  otpRequired,
   initialName,
   notice,
   onSaved,
@@ -200,7 +207,8 @@ export function IdentityStep({
 
       if (res.ok) {
         onSaved((await res.json()) as LeadCreatedResponse, name.trim());
-        await sendCode();
+        if (otpRequired) await sendCode();
+        else onVerified();
         return;
       }
 
@@ -268,10 +276,13 @@ export function IdentityStep({
 
   /* ---------------------------------------------------------------- */
 
-  const locked = !!lead;
+  // A saved lead waiting for its code: the fields are locked and the code
+  // panel is open. With the OTP off a saved lead is only shown here after a
+  // timeout, and the form is the way back in, so it stays open.
+  const awaitingCode = !!lead && otpRequired;
   // A saved lead with no code on its way yet: after a refresh, a timeout, or a
   // code that died. The button asks for one.
-  const needsCode = !!lead && !otpRef;
+  const needsCode = awaitingCode && !otpRef;
 
   return (
     <div className="flex flex-col gap-7">
@@ -285,7 +296,7 @@ export function IdentityStep({
 
       <form
         onSubmit={(event) => {
-          if (!lead) return void saveLead(event);
+          if (!awaitingCode) return void saveLead(event);
           event.preventDefault();
           if (needsCode) void sendCode();
           else void verify(event);
@@ -301,7 +312,7 @@ export function IdentityStep({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Enter your full name"
-            disabled={locked}
+            disabled={awaitingCode}
             className={inputClass(!!errors.name)}
             aria-invalid={!!errors.name}
           />
@@ -323,10 +334,10 @@ export function IdentityStep({
               maxLength={14}
               // A resumed lead's number is shown masked: the browser is only
               // ever given its last four digits.
-              value={locked && !phone && lead ? `•••••• ${lead.phoneLast4}` : phone}
+              value={awaitingCode && !phone && lead ? `•••••• ${lead.phoneLast4}` : phone}
               onChange={(e) => setPhone(e.target.value.replace(/[^\d\s+]/g, ''))}
               placeholder="Enter your 10-digit mobile number"
-              disabled={locked}
+              disabled={awaitingCode}
               className={`${inputClass(!!errors.phone)} pl-17`}
               aria-invalid={!!errors.phone}
             />
@@ -339,7 +350,7 @@ export function IdentityStep({
             pressing Continue — said plainly, here, before they press it — and
             recorded with its version like the marketing one. Marketing stays
             a box nobody has ticked for them. */}
-        {!locked && (
+        {!awaitingCode && (
           <fieldset className="-mt-1 flex flex-col gap-1.5 rounded-xl bg-amp-page/70 px-3.5 py-2.5">
             <legend className="sr-only">How we may contact you</legend>
             <p className="text-[12px] leading-relaxed text-amp-muted">
@@ -364,7 +375,7 @@ export function IdentityStep({
               value={pincode}
               onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))}
               placeholder="Enter your 6-digit pincode"
-              disabled={locked}
+              disabled={awaitingCode}
               className={`${inputClass(!!errors.pincode)} pr-11`}
               aria-invalid={!!errors.pincode}
             />
@@ -373,7 +384,7 @@ export function IdentityStep({
         </Field>
 
         {/* The code, once it is on its way. Same step, same screen. */}
-        {lead && (
+        {lead && awaitingCode && (
           <div className="amp-rise flex flex-col gap-3 rounded-2xl border border-amp-line bg-amp-page/60 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -454,10 +465,10 @@ export function IdentityStep({
         <StepActions>
           <PrimaryButton
             type="submit"
-            loading={submitting || (busy && !!lead && (needsCode || code.length === 6))}
-            disabled={busy || (!!lead && !needsCode && code.length !== 6) || (needsCode && cooldown > 0)}
+            loading={submitting || (busy && awaitingCode && (needsCode || code.length === 6))}
+            disabled={busy || (awaitingCode && !needsCode && code.length !== 6) || (needsCode && cooldown > 0)}
           >
-            {!lead
+            {!awaitingCode
               ? 'Continue'
               : needsCode
                 ? cooldown > 0
@@ -467,7 +478,7 @@ export function IdentityStep({
           </PrimaryButton>
         </StepActions>
 
-        {lead && (
+        {awaitingCode && (
           // Spec 4: the record stays saved whether or not this step completes.
           <p className="-mt-2 text-center text-[12px] leading-relaxed text-amp-muted">
             Your details are saved. If the code doesn&apos;t arrive, we&apos;ll still call you.
@@ -487,17 +498,24 @@ export function IdentityStep({
 export function VerifiedDetails({
   name,
   lead,
+  verifiedBadge,
   onContinue,
   onStartOver,
 }: {
   name: string;
   lead: LeadCreatedResponse;
+  /** False with the OTP off: nothing was verified, so nothing says it was. */
+  verifiedBadge: boolean;
   onContinue: () => void;
   onStartOver: () => void;
 }) {
   return (
     <div className="flex flex-col gap-7">
-      <StepHeader eyebrow={EYEBROW} title={TITLE} text="Your number is verified. Let’s move ahead!" />
+      <StepHeader
+        eyebrow={EYEBROW}
+        title={TITLE}
+        text={verifiedBadge ? 'Your number is verified. Let’s move ahead!' : 'Your details are saved. Let’s move ahead!'}
+      />
 
       <div className="flex items-center gap-4 rounded-2xl border border-amp-line bg-white p-4">
         <span
@@ -512,10 +530,12 @@ export function VerifiedDetails({
             +91 ••••••{lead.phoneLast4} · {lead.pincode}
           </p>
         </div>
-        <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-amp-offer px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amp-offer-ink">
-          <CheckIcon className="size-3" />
-          Verified
-        </span>
+        {verifiedBadge && (
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-amp-offer px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amp-offer-ink">
+            <CheckIcon className="size-3" />
+            Verified
+          </span>
+        )}
       </div>
 
       <StepActions>

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireJourney, writeSession } from '@/lib/http/session';
+import { readJsonBody } from '@/lib/http/body';
 import { chooseDealerSchema } from '@/lib/schemas/dealer';
 import { chooseDealer } from '@/lib/leads/choose-dealer';
 import {
@@ -33,14 +34,10 @@ export async function POST(request: NextRequest) {
   if (!gate.ok) return gate.response;
   const { session } = gate;
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
-  }
+  const json = await readJsonBody(request);
+  if (!json.ok) return json.response;
 
-  const parsed = chooseDealerSchema.safeParse(raw);
+  const parsed = chooseDealerSchema.safeParse(json.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: 'validation_failed', message: parsed.error.issues[0]?.message },

@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { Prisma, type PaymentType, type PrismaClient } from '@prisma/client';
 import { resolvePrice } from '@/lib/pricing/price';
 import { dealerForLead, resolvePincode } from '@/lib/dealers/resolve';
@@ -65,10 +66,18 @@ export interface CreatedOrder {
   dealerChangedReason: string | null;
 }
 
-/** Short, readable, and unmistakably ours in Juspay's dashboard. */
+const ORDER_ID_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+/**
+ * Short, readable, and unmistakably ours in Juspay's dashboard. Same shape as
+ * ever, but the five characters now come from the CSPRNG rather than
+ * Math.random(): an order id is not a secret, but it should not be
+ * predictable from the one before it (security audit V-15).
+ */
 function newOrderId(): string {
   const stamp = Date.now().toString(36).toUpperCase();
-  const noise = Math.random().toString(36).slice(2, 7).toUpperCase();
+  let noise = '';
+  for (let i = 0; i < 5; i++) noise += ORDER_ID_ALPHABET[randomInt(ORDER_ID_ALPHABET.length)];
   return `AMP-${stamp}-${noise}`;
 }
 

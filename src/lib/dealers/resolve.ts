@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { getRegion, regionForPincodeZone } from '@/lib/catalog/catalog';
+import { isOffered, offeredDealerWhere } from './offered';
 
 /**
  * Pincode to dealer and region.
@@ -64,7 +65,7 @@ export async function resolvePincode(
   const region = getRegion(mapping.regionCode);
 
   const mapped = mapping.dealer;
-  if (mapped?.active) {
+  if (mapped && isOffered(mapped)) {
     return {
       pincode,
       stateCode: mapping.stateCode,
@@ -80,7 +81,7 @@ export async function resolvePincode(
   // rather than dead-ending the customer.
   const fallback = await prisma.dealer.findFirst({
     where: {
-      active: true,
+      ...offeredDealerWhere(),
       pincodeMap: { some: { regionCode: mapping.regionCode } },
     },
     orderBy: { dealerCode: 'asc' },
@@ -110,7 +111,7 @@ async function resolveByZone(
   if (!regionCode) return UNSERVICEABLE(pincode);
 
   const dealer = await prisma.dealer.findFirst({
-    where: { active: true, pincodeMap: { some: { regionCode } } },
+    where: { ...offeredDealerWhere(), pincodeMap: { some: { regionCode } } },
     orderBy: { dealerCode: 'asc' },
   });
 
@@ -142,7 +143,8 @@ export async function dealerForLead(
 ): Promise<ResolvedDealer | null> {
   if (!lead.dealerCode) return fallback;
   const chosen = await prisma.dealer.findUnique({ where: { dealerCode: lead.dealerCode } });
-  return chosen?.active ? toResolved(chosen) : fallback;
+  // A dealer outside the pilot no longer takes leads here, like a closed one.
+  return chosen && isOffered(chosen) ? toResolved(chosen) : fallback;
 }
 
 function toResolved(dealer: {

@@ -68,7 +68,12 @@ const KNOWN_VARS = [
   'ZOHO_LEAD_FUNCTION',
   'ZOHO_TEST_RIDE_FUNCTION',
   'ZOHO_DEALERS_FUNCTION',
+  'ZOHO_PRODUCTS_FUNCTION',
   'ZOHO_TIMEOUT_MS',
+  'OTP_REQUIRED',
+  'PILOT_DEALER_CRM_IDS',
+  'GOAL_APP_URL',
+  'ADMIN_ALLOWED_IPS',
 ] as const;
 
 export async function register(): Promise<void> {
@@ -97,9 +102,58 @@ export async function register(): Promise<void> {
   const crm = crmSettings();
   const crmLabel = crm.provider === 'zoho' ? (crm.sandbox ? 'zoho-SANDBOX' : 'zoho-LIVE') : 'fake';
 
+  // A typo in either stops the app here, not on a customer's first request.
+  const { parseGoalAppUrl, parsePilotDealerIds } = await import('./lib/env');
+  const pilot = parsePilotDealerIds(process.env.PILOT_DEALER_CRM_IDS);
+  const goalApp = parseGoalAppUrl(process.env.GOAL_APP_URL);
+  const otpRequired = process.env.OTP_REQUIRED !== 'false';
+
+  // The hand-off must lead away from this site, or a customer outside the
+  // pilot is sent round in a circle.
+  const siteHost = process.env.SITE_HOST?.trim().toLowerCase();
+  if (goalApp && siteHost && new URL(goalApp).hostname.toLowerCase() === siteHost) {
+    throw new Error(`GOAL_APP_URL points at this site (${siteHost}). It must be the Goal App's own address.`);
+  }
+
   console.info(
-    `[startup] APP_ENV=${appEnv} juspay=${juspayLive ? 'REAL' : 'fake'} otpEcho=${otpEcho ? 'ON' : 'off'} buyNow=${buyNow ? 'ON' : 'off'} crm=${crmLabel}`,
+    `[startup] APP_ENV=${appEnv} juspay=${juspayLive ? 'REAL' : 'fake'} otpEcho=${otpEcho ? 'ON' : 'off'} buyNow=${buyNow ? 'ON' : 'off'} crm=${crmLabel} ` +
+      `otp=${otpRequired ? 'required' : 'OFF'} dealers=${pilot ? `pilot(${pilot.length})` : 'all'} goalApp=${goalApp ? 'set' : 'off'}`,
   );
+
+  if (!otpRequired) {
+    console.warn(
+      '[startup] OTP is OFF (OTP_REQUIRED=false): numbers are not verified, and unverified leads go to the CRM. ' +
+        'Switch it back on once the SMS sender clears DLT.',
+    );
+  }
+
+  /*
+   * Payment is never taken against a number nobody proved. create-order.ts
+   * refuses an unverified lead regardless, so this pairing would put a Buy
+   * button on the page that can only fail.
+   */
+  if (buyNow && !otpRequired) {
+    throw new Error('BUY_NOW_ENABLED=true needs the OTP. Unset OTP_REQUIRED, or turn Buy Now off.');
+  }
+
+  /*
+   * A live deployment (a production build with APP_ENV production or unset)
+   * never runs the stand-in checkout: lib/juspay/client.ts gives it a client
+   * that takes no payment instead. Buy Now there without the real client is a
+   * Buy button that can only fail, and before that safeguard it confirmed
+   * payments nobody made (security audit V-01). Stop here, where whoever is
+   * deploying sees it.
+   */
+  const live =
+    process.env.NODE_ENV === 'production' &&
+    process.env.APP_ENV !== 'development' &&
+    process.env.APP_ENV !== 'uat';
+  if (live && buyNow && !juspayLive) {
+    throw new Error(
+      'BUY_NOW_ENABLED=true in production needs the real Juspay client. ' +
+        'Set JUSPAY_ENABLED=true with the JUSPAY_* credentials, or turn Buy Now off.',
+    );
+  }
 
   if (crm.provider === 'fake' && (process.env.APP_ENV ?? 'production') === 'production') {
     console.warn(

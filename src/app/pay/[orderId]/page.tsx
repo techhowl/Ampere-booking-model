@@ -5,6 +5,8 @@ import { SESSION_COOKIE, parseSession } from '@/lib/crypto/session';
 import { getModel } from '@/lib/catalog/catalog';
 import { formatRupees } from '@/lib/pricing/price';
 import { PAYMENT_TYPE_LABELS, type PaymentTypeCode } from '@/lib/schemas/order';
+import { fakePaymentsAllowed } from '@/lib/juspay/client';
+import { fakeWebhookAuthorization } from '@/lib/juspay/juspay';
 import { FakeCheckout } from './FakeCheckout';
 
 /**
@@ -19,9 +21,12 @@ import { FakeCheckout } from './FakeCheckout';
  * data touches this codebase.
  *
  * It deletes itself from the journey the day the real redirect URL is used —
- * and until then it is closed whenever the real client is on, and shows an
- * order only to the browser that owns it. An order id travels in URLs; on its
- * own it must not reveal what was bought, for how much, from whom.
+ * and until then it is closed whenever the real client is on, closed in a live
+ * deployment whatever the flags say, and shows an order only to the browser
+ * that owns it. An order id travels in URLs; on its own it must not reveal
+ * what was bought, for how much, from whom.
+ *
+ * The webhook credential it hands the browser is good for this one order only.
  */
 
 export default async function FakePayPage({
@@ -31,7 +36,7 @@ export default async function FakePayPage({
 }) {
   const { orderId } = await params;
 
-  if (process.env.JUSPAY_ENABLED === 'true') notFound();
+  if (process.env.JUSPAY_ENABLED === 'true' || !fakePaymentsAllowed()) notFound();
 
   const session = parseSession((await cookies()).get(SESSION_COOKIE)?.value);
   const order = await prisma.order.findUnique({
@@ -75,7 +80,10 @@ export default async function FakePayPage({
             </div>
           </dl>
 
-          <FakeCheckout orderId={order.orderId} />
+          <FakeCheckout
+            orderId={order.orderId}
+            webhookAuthorization={fakeWebhookAuthorization(order.orderId)}
+          />
         </div>
       </div>
     </div>
