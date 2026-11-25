@@ -118,6 +118,16 @@ hand correction in `src/lib/dealers/pincode-geo.ts`.
 | Live API | `https://www.zohoapis.in`, same function names, same token endpoint (from 2026-11-23) |
 | Products | `GET {api}/crm/v7/functions/get_products/actions/execute?auth_type=oauth` (live collection) |
 
+**Live Create Lead answers differently (seen from go-live, confirmed by
+Greaves 2026-11-25).** It returns the function's own JSON as the whole body,
+`{"status":"success","lead_id":…}`, with no `code`/`details` wrapper; live
+Create Test Ride still uses the wrapper below. Until 2026-11-25 the app read
+the plain answer as "unknown" (`unreachable: zoho_unknown`), retried, and every
+retry was another lead in the CRM. `parseFunctionResponse` now finds the
+answer in either shape, and a refusal that names the existing lead
+(`Existing_lead_id`) counts as a duplicate however it is worded, so the job
+links to that lead instead of sending again.
+
 **HTTP 200 does not mean success.** Every business answer is a 200, with the
 real result as a JSON *string* in `details.output`:
 

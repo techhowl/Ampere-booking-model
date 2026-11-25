@@ -93,56 +93,128 @@ function idFrom(output: string, key: string): string | null {
   return match?.[1] ?? null;
 }
 
+type FunctionResult = { status?: unknown; category?: unknown; message?: unknown };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** "success" or "failure", in any case. */
+function outcomeOf(value: unknown): 'success' | 'failure' | null {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return text === 'success' || text === 'failure' ? text : null;
+}
+
+/**
+ * The function's own answer, wherever this deployment put it. Searched
+ * breadth-first, a few levels down, for the first object whose `status` is
+ * success or failure: the whole body (live Create Lead, which answers in plain
+ * JSON), `details.output` when Zoho hands it over as an object rather than a
+ * string, or a `data`/`response`/`body` wrapper.
+ */
+function findResult(root: unknown): FunctionResult | null {
+  let level: unknown[] = [root];
+  for (let depth = 0; depth < 4 && level.length > 0; depth++) {
+    const next: unknown[] = [];
+    for (const node of level) {
+      if (Array.isArray(node)) {
+        next.push(...node.slice(0, 5));
+        continue;
+      }
+      if (!isRecord(node)) continue;
+      if (outcomeOf(node.status)) return node as FunctionResult;
+      next.push(...Object.values(node));
+    }
+    level = next;
+  }
+  return null;
+}
+
+/**
+ * The top-level keys of an answer we could not read — never its values, which
+ * may hold customer details — so the log says what shape arrived.
+ */
+function shapeOf(parsed: unknown): string {
+  if (Array.isArray(parsed)) return 'array';
+  if (!isRecord(parsed)) return typeof parsed;
+  const keys = Object.keys(parsed)
+    .slice(0, 8)
+    .map((key) => key.replace(/[^A-Za-z0-9_]/g, '').slice(0, 30));
+  return `keys:${keys.join(',') || 'none'}`;
+}
+
+/** The answer, read from `text` so 19-digit ids keep every digit. */
+function resultFrom(result: FunctionResult, text: string): CrmResult {
+  if (outcomeOf(result.status) === 'success') {
+    return {
+      kind: 'accepted',
+      message: String(result.message ?? ''),
+      leadId: idFrom(text, 'lead_id'),
+      testRideId: idFrom(text, 'test_ride_id'),
+    };
+  }
+  return {
+    kind: 'rejected',
+    category: String(result.category ?? ''),
+    message: String(result.message ?? ''),
+    // Create Lead's "Duplicate Lead" names the existing lead this way.
+    leadId: idFrom(text, 'Existing_lead_id') ?? idFrom(text, 'lead_id'),
+  };
+}
+
 /**
  * Read a function call's HTTP response. Exported for the tests, which feed it
- * responses recorded from the sandbox.
+ * responses recorded from the sandbox and the shapes seen on live.
+ *
+ * Two shapes are business answers:
+ *   - Zoho's wrapper, `{"code":"success","details":{"output":"<JSON text>"}}`.
+ *     The sandbox, and live Create Test Ride, answer this way.
+ *   - The function's own JSON as the whole body, `{"status":"success",
+ *     "lead_id":…}`. Live Create Lead has answered this way since go-live
+ *     (2026-11-23). Read as an unknown answer, every lead was sent again on
+ *     each retry, and each send was another lead in the CRM.
  */
 export function parseFunctionResponse(status: number, body: string): CrmResult {
   if (status === 401) return { kind: 'unreachable', reason: 'unauthorised', ambiguous: false };
   if (status === 429) return { kind: 'unreachable', reason: 'rate_limited', ambiguous: false };
   // A 5xx may come after the function has already written the record.
   if (status >= 500) return { kind: 'unreachable', reason: `http_${status}`, ambiguous: true };
-  if (status !== 200) return { kind: 'unreachable', reason: `http_${status}`, ambiguous: false };
 
-  let envelope: { code?: unknown; details?: { output?: unknown } };
+  let parsed: unknown;
   try {
-    envelope = JSON.parse(body) as typeof envelope;
+    parsed = JSON.parse(body);
   } catch {
+    if (status !== 200) return { kind: 'unreachable', reason: `http_${status}`, ambiguous: false };
     return { kind: 'unreachable', reason: 'unreadable_response', ambiguous: true };
   }
 
-  const output = envelope?.details?.output;
-  if (envelope?.code !== 'success' || typeof output !== 'string') {
-    // The function itself did not complete normally; it may have written
-    // something before it stopped.
-    return { kind: 'unreachable', reason: `zoho_${String(envelope?.code ?? 'unknown')}`, ambiguous: true };
+  const envelope = isRecord(parsed) ? parsed : null;
+  const details = isRecord(envelope?.details) ? envelope.details : null;
+  const output = details?.output;
+  const wrapped = typeof envelope?.code === 'string' && envelope.code.toLowerCase() === 'success';
+
+  // Zoho's wrapper with the answer as text: parse the text, read ids off it.
+  if (status === 200 && wrapped && typeof output === 'string') {
+    let result: unknown;
+    try {
+      result = JSON.parse(output);
+    } catch {
+      return { kind: 'unreachable', reason: 'unreadable_output', ambiguous: true };
+    }
+    if (isRecord(result) && outcomeOf(result.status)) return resultFrom(result, output);
+    return { kind: 'unreachable', reason: 'unexpected_output', ambiguous: true };
   }
 
-  let result: { status?: unknown; category?: unknown; message?: unknown };
-  try {
-    result = JSON.parse(output) as typeof result;
-  } catch {
-    return { kind: 'unreachable', reason: 'unreadable_output', ambiguous: true };
-  }
+  // Anything else: find the function's own answer in the JSON. A function that
+  // sets its own status code (a 400 for a duplicate, say) is read the same way.
+  const result = findResult(parsed);
+  if (result) return resultFrom(result, body);
 
-  if (result.status === 'success') {
-    return {
-      kind: 'accepted',
-      message: String(result.message ?? ''),
-      leadId: idFrom(output, 'lead_id'),
-      testRideId: idFrom(output, 'test_ride_id'),
-    };
-  }
-  if (result.status === 'failure') {
-    return {
-      kind: 'rejected',
-      category: String(result.category ?? ''),
-      message: String(result.message ?? ''),
-      // Create Lead's "Duplicate Lead" names the existing lead this way.
-      leadId: idFrom(output, 'Existing_lead_id') ?? idFrom(output, 'lead_id'),
-    };
-  }
-  return { kind: 'unreachable', reason: 'unexpected_output', ambiguous: true };
+  if (status !== 200) return { kind: 'unreachable', reason: `http_${status}`, ambiguous: false };
+  // The function did not complete normally, or answered in a shape we do not
+  // know; it may have written something before it stopped.
+  const code = typeof envelope?.code === 'string' ? envelope.code.replace(/[^A-Za-z0-9_]/g, '').slice(0, 40) : 'unknown';
+  return { kind: 'unreachable', reason: `zoho_${code || 'unknown'} (${shapeOf(parsed)})`, ambiguous: true };
 }
 
 /**

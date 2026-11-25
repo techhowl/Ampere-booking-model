@@ -102,6 +102,72 @@ describe('reading a function response', () => {
   });
 });
 
+/*
+ * Live Create Lead answers in plain JSON: the function's result is the whole
+ * body, with no {"code","details"} wrapper (Greaves, 2026-11-25). Read as an
+ * unknown answer, it made every lead a retry, and every retry another lead.
+ */
+const LIVE = {
+  leadCreated: '{"status":"success","category":"success","message":"Lead created successfully","lead_id":"1270103000012345678"}',
+  leadCreatedBareId: '{"status":"success","message":"Lead created successfully","lead_id":1270103000012345678}',
+  duplicateNamed:
+    '{"status":"failure","category":"rule_failure","message":"Duplicate Lead: Active Lead already exists in the system","Existing_lead_id":"1270103000087654321"}',
+  technical: '{"status":"failure","category":"api_failure","message":"Lead creation failed due to technical reasons"}',
+};
+
+describe('reading a live Create Lead answer (plain JSON, no wrapper)', () => {
+  it('reads a created lead, id intact', () => {
+    expect(parseFunctionResponse(200, LIVE.leadCreated)).toEqual({
+      kind: 'accepted',
+      message: 'Lead created successfully',
+      leadId: '1270103000012345678',
+      testRideId: null,
+    });
+    expect(parseFunctionResponse(200, LIVE.leadCreatedBareId)).toMatchObject({ kind: 'accepted', leadId: '1270103000012345678' });
+  });
+
+  it('reads a duplicate with the existing lead id, so the job links instead of resending', () => {
+    expect(parseFunctionResponse(200, LIVE.duplicateNamed)).toEqual({
+      kind: 'rejected',
+      category: 'rule_failure',
+      message: 'Duplicate Lead: Active Lead already exists in the system',
+      leadId: '1270103000087654321',
+    });
+  });
+
+  it('reads a failure as a rejection', () => {
+    expect(parseFunctionResponse(200, LIVE.technical)).toMatchObject({ kind: 'rejected', category: 'api_failure', leadId: null });
+  });
+
+  it('reads the answer however it is wrapped', () => {
+    // Zoho's wrapper, but the output handed over as an object, not text.
+    const objectOutput = `{"code":"success","details":{"output":${LIVE.leadCreated},"output_type":"map","id":"1"},"message":"function executed successfully"}`;
+    expect(parseFunctionResponse(200, objectOutput)).toMatchObject({ kind: 'accepted', leadId: '1270103000012345678' });
+    // In a data array, or under a response/body key.
+    expect(parseFunctionResponse(200, `{"data":[${LIVE.leadCreated}]}`)).toMatchObject({ kind: 'accepted', leadId: '1270103000012345678' });
+    expect(parseFunctionResponse(200, `{"response":{"body":${LIVE.duplicateNamed}}}`)).toMatchObject({
+      kind: 'rejected',
+      leadId: '1270103000087654321',
+    });
+    // Status in capitals.
+    expect(parseFunctionResponse(200, LIVE.leadCreated.replace('"success","category"', '"Success","category"'))).toMatchObject({
+      kind: 'accepted',
+    });
+  });
+
+  it('reads a duplicate sent with its own status code', () => {
+    expect(parseFunctionResponse(409, LIVE.duplicateNamed)).toMatchObject({ kind: 'rejected', leadId: '1270103000087654321' });
+    expect(parseFunctionResponse(400, LIVE.technical)).toMatchObject({ kind: 'rejected' });
+  });
+
+  it('still never mistakes an unknown shape for success, and names its keys (not values) for the log', () => {
+    const result = parseFunctionResponse(200, '{"message":"done","Phone":"+919876543210"}');
+    expect(result).toMatchObject({ kind: 'unreachable', ambiguous: true });
+    expect(result.kind === 'unreachable' && result.reason).toBe('zoho_unknown (keys:message,Phone)');
+    expect(JSON.stringify(result)).not.toContain('9876543210');
+  });
+});
+
 describe('recordsOf', () => {
   it('reads ids as strings and drops anything that is not one', () => {
     const body = '{"data":[{"id":"1456765000001702028","Name":"Nexus EX+"},{"id":12,"Name":"x"},{"Name":"no id"}],"info":{"count":3}}';

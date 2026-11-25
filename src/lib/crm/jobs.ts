@@ -709,6 +709,9 @@ export function verdictOf(result: CrmResult): Verdict {
   if (result.kind === 'unreachable') return 'retry';
   const message = result.message.toLowerCase();
   if (message.startsWith('duplicate lead')) return 'duplicate';
+  // A refusal that names the customer's existing lead is a duplicate however
+  // it is worded; live Create Lead's wording need not match the sandbox's.
+  if (result.leadId && /duplicate|already exists/.test(message)) return 'duplicate';
   if (message.includes('mandatory fields')) return 'missing_fields';
   if (message.includes('lead id is not available')) return 'stale_lead_id';
   return 'retry';
