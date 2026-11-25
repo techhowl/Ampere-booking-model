@@ -30,10 +30,17 @@ services:
 
   # One-shot. Runs to completion before the app is allowed to start, so the
   # app never serves against a schema it does not expect.
+  #
+  # Built from the `build` stage, like `tools`: the runtime image copies only
+  # node_modules/prisma and node_modules/@prisma, but pnpm keeps the CLI's own
+  # dependencies (@prisma/engines, @prisma/config, dotenv for prisma.config.ts)
+  # in node_modules/.pnpm, so `prisma migrate deploy` there dies with
+  # "Cannot find module '@prisma/engines'".
   migrate:
     build:
       context: .
       dockerfile: Dockerfile
+      target: build
     restart: 'no'
     environment:
       DATABASE_URL: ${DATABASE_URL}
